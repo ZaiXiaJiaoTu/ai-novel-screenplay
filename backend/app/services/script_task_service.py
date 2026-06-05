@@ -17,6 +17,7 @@ from app.schemas.script_task_schema import (
     ScriptTaskCreateResult,
     ScriptTaskDetail,
 )
+from app.services.llm_service import LlmServiceError, call_llm_for_task
 from app.utils.chapter_parser import count_words
 
 
@@ -136,6 +137,121 @@ def build_placeholder_generation(book: Book, chapters: list[Chapter], task: Gene
     }
 
 
+def strip_markdown_code_fence(text: str) -> str:
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def parse_script_yaml_response(response_text: str) -> dict | None:
+    raw_yaml = strip_markdown_code_fence(response_text)
+    try:
+        parsed = yaml.safe_load(raw_yaml)
+    except yaml.YAMLError:
+        return None
+    if not isinstance(parsed, dict) or "script" not in parsed:
+        return None
+    return {
+        "yaml": yaml.safe_dump(parsed, allow_unicode=True, sort_keys=False),
+        "structured": parsed,
+    }
+
+
+def build_llm_variables(
+    book: Book,
+    chapters: list[Chapter],
+    task: GenerationTask,
+    generated: dict | None = None,
+) -> dict:
+    chapter_payload = [
+        {
+            "chapter_index": chapter.chapter_index,
+            "title": chapter.title,
+            "content": chapter.content[:3000],
+        }
+        for chapter in chapters
+    ]
+    return {
+        "book_title": book.title,
+        "adapt_scope": task.adapt_scope or {},
+        "generation_config": task.generation_config or {},
+        "chapters": chapter_payload,
+        "style_strategy": (generated or {}).get("style_strategy", {}),
+        "scene_plan": (generated or {}).get("scene_plan", {}),
+    }
+
+
+def build_generation_outputs(db: Session, book: Book, chapters: list[Chapter], task: GenerationTask) -> dict:
+    generated = build_placeholder_generation(book, chapters, task)
+    variables = build_llm_variables(book, chapters, task)
+
+    try:
+        style_text = call_llm_for_task(
+            db,
+            task_type="style_strategy_generation",
+            variables=variables,
+            task_id=task.id,
+        )
+        generated["style_strategy"] = {
+            "text": style_text,
+            "source": "llm",
+        }
+    except LlmServiceError:
+        generated["style_strategy"]["source"] = "placeholder"
+    except Exception as exc:
+        generated["style_strategy"]["source"] = "placeholder"
+        generated["style_strategy"]["llm_error"] = str(exc)
+
+    variables = build_llm_variables(book, chapters, task, generated)
+    try:
+        scene_plan_text = call_llm_for_task(
+            db,
+            task_type="scene_plan_generation",
+            variables=variables,
+            task_id=task.id,
+        )
+        generated["scene_plan"] = {
+            "text": scene_plan_text,
+            "source": "llm",
+        }
+    except LlmServiceError:
+        generated["scene_plan"]["source"] = "placeholder"
+    except Exception as exc:
+        generated["scene_plan"]["source"] = "placeholder"
+        generated["scene_plan"]["llm_error"] = str(exc)
+
+    variables = build_llm_variables(book, chapters, task, generated)
+    try:
+        script_yaml_text = call_llm_for_task(
+            db,
+            task_type="script_yaml_generation",
+            variables=variables,
+            task_id=task.id,
+        )
+        parsed_script_yaml = parse_script_yaml_response(script_yaml_text)
+        if parsed_script_yaml is None:
+            generated["script_yaml"]["source"] = "placeholder"
+            generated["script_yaml"]["llm_error"] = "大模型返回内容不是有效剧本 YAML"
+        else:
+            generated["script_yaml"] = {
+                **parsed_script_yaml,
+                "source": "llm",
+            }
+    except LlmServiceError:
+        generated["script_yaml"]["source"] = "placeholder"
+    except Exception as exc:
+        generated["script_yaml"]["source"] = "placeholder"
+        generated["script_yaml"]["llm_error"] = str(exc)
+
+    return generated
+
+
 def save_generated_script_to_shelf(
     db: Session,
     *,
@@ -223,7 +339,7 @@ def start_script_task(db: Session, task_id: int) -> ScriptTaskDetail | None:
 
     task.status = "running"
     task.error_message = None
-    generated = build_placeholder_generation(book, list(chapters), task)
+    generated = build_generation_outputs(db, book, list(chapters), task)
     for step, artifact_type in [
         ("style_strategy", "style_strategy"),
         ("scene_planning", "scene_plan"),
