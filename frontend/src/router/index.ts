@@ -6,7 +6,7 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: "/", component: HomeView },
-    { path: "/books", component: () => import("@/views/PlaceholderView.vue") },
+    { path: "/books", component: () => import("@/views/BooksView.vue") },
     { path: "/scripts", component: () => import("@/views/PlaceholderView.vue") },
     {
       path: "/settings/llm-configs",
