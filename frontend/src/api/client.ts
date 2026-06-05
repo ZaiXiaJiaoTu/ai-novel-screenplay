@@ -96,6 +96,38 @@ export interface LlmConfigTestResult {
   status: string;
 }
 
+export interface PromptTemplateDetail {
+  template_id: number;
+  template_name: string;
+  task_type: string;
+  system_prompt: string;
+  user_prompt_template: string;
+  output_format: string;
+  variables: string[] | null;
+  enabled: boolean;
+  version: number;
+}
+
+export interface PromptTemplatePayload {
+  template_name: string;
+  task_type: string;
+  system_prompt: string;
+  user_prompt_template: string;
+  output_format: string;
+  variables: string[] | null;
+  enabled: boolean;
+}
+
+export interface PromptTemplateVersionDetail {
+  version_id: number;
+  template_id: number;
+  version: number;
+  system_prompt: string;
+  user_prompt_template: string;
+  output_format: string;
+  variables: string[] | null;
+}
+
 function unwrap<T>(response: AxiosResponse<ApiEnvelope<T>>): T {
   return response.data.data;
 }
@@ -164,5 +196,63 @@ export async function setDefaultLlmConfig(configId: number) {
 export async function testLlmConfig(configId: number) {
   return unwrap(
     await apiClient.post<ApiEnvelope<LlmConfigTestResult>>(`/llm-configs/${configId}/test`)
+  );
+}
+
+export async function fetchPromptTemplates(params?: {
+  task_type?: string;
+  enabled?: boolean;
+  keyword?: string;
+}) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<PromptTemplateDetail[]>>("/prompt-templates", { params })
+  );
+}
+
+export async function seedDefaultPromptTemplates() {
+  return unwrap(
+    await apiClient.post<ApiEnvelope<PromptTemplateDetail[]>>("/prompt-templates/seed-defaults")
+  );
+}
+
+export async function createPromptTemplate(payload: PromptTemplatePayload) {
+  return unwrap(
+    await apiClient.post<ApiEnvelope<PromptTemplateDetail>>("/prompt-templates", payload)
+  );
+}
+
+export async function updatePromptTemplate(
+  templateId: number,
+  payload: Partial<PromptTemplatePayload>
+) {
+  return unwrap(
+    await apiClient.put<ApiEnvelope<PromptTemplateDetail>>(
+      `/prompt-templates/${templateId}`,
+      payload
+    )
+  );
+}
+
+export async function deletePromptTemplate(templateId: number) {
+  return unwrap(
+    await apiClient.delete<ApiEnvelope<{ deleted: boolean }>>(
+      `/prompt-templates/${templateId}`
+    )
+  );
+}
+
+export async function fetchPromptTemplateVersions(templateId: number) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<PromptTemplateVersionDetail[]>>(
+      `/prompt-templates/${templateId}/versions`
+    )
+  );
+}
+
+export async function rollbackPromptTemplate(templateId: number, versionId: number) {
+  return unwrap(
+    await apiClient.post<ApiEnvelope<PromptTemplateDetail>>(
+      `/prompt-templates/${templateId}/rollback/${versionId}`
+    )
   );
 }

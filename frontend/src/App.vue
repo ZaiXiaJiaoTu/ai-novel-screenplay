@@ -19,6 +19,10 @@
           <el-icon><Setting /></el-icon>
           <span>模型配置</span>
         </el-menu-item>
+        <el-menu-item index="/settings/prompt-templates">
+          <el-icon><Tickets /></el-icon>
+          <span>提示词模板</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
@@ -31,5 +35,5 @@
 </template>
 
 <script setup lang="ts">
-import { Collection, Document, House, Setting } from "@element-plus/icons-vue";
+import { Collection, Document, House, Setting, Tickets } from "@element-plus/icons-vue";
 </script>
