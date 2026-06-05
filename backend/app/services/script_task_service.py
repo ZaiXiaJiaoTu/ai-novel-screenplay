@@ -163,6 +163,21 @@ def parse_script_yaml_response(response_text: str) -> dict | None:
     }
 
 
+def build_script_plain_text(script_payload: dict) -> str:
+    script = script_payload.get("script") or {}
+    metadata = script.get("metadata") or {}
+    scenes = script.get("scenes") or []
+    lines = [
+        metadata.get("segment_title") or metadata.get("title") or "剧本片段",
+        *[
+            f"{scene.get('scene_id', '')}. {scene.get('scene_title', '')}".strip()
+            for scene in scenes
+            if isinstance(scene, dict)
+        ],
+    ]
+    return "\n".join(lines).strip()
+
+
 def build_llm_variables(
     book: Book,
     chapters: list[Chapter],
@@ -288,15 +303,7 @@ def save_generated_script_to_shelf(
         db.flush()
         task.script_project_id = project.id
 
-    plain_text = "\n".join(
-        [
-            metadata.get("segment_title") or metadata.get("title") or "剧本片段",
-            *[
-                f"{scene.get('scene_id', '')}. {scene.get('scene_title', '')}".strip()
-                for scene in scenes
-            ],
-        ]
-    ).strip()
+    plain_text = build_script_plain_text(script_yaml["structured"])
     segment = ScriptSegment(
         project_id=project.id,
         book_id=book.id,
@@ -428,6 +435,45 @@ def get_artifact(db: Session, artifact_id: int) -> GenerationArtifactDetail | No
     )
 
 
+def sync_script_yaml_artifact_to_segment(db: Session, artifact: GenerationArtifact) -> None:
+    if artifact.artifact_type != "script_yaml":
+        return
+    task = db.scalar(select(GenerationTask).where(GenerationTask.id == artifact.task_id))
+    if task is None or task.script_project_id is None:
+        return
+
+    content = artifact.content or {}
+    structured = content.get("structured") if isinstance(content, dict) else None
+    if not isinstance(structured, dict) or "script" not in structured:
+        return
+
+    script = structured.get("script") or {}
+    metadata = script.get("metadata") or {}
+    scenes = script.get("scenes") or []
+    if not isinstance(metadata, dict) or not isinstance(scenes, list):
+        return
+
+    segment = db.scalar(
+        select(ScriptSegment)
+        .where(
+            ScriptSegment.project_id == task.script_project_id,
+            ScriptSegment.is_deleted.is_(False),
+        )
+        .order_by(ScriptSegment.created_at.desc(), ScriptSegment.id.desc())
+    )
+    if segment is None:
+        return
+
+    yaml_content = content.get("yaml") if isinstance(content.get("yaml"), str) else None
+    segment.yaml_content = yaml_content or yaml.safe_dump(
+        structured, allow_unicode=True, sort_keys=False
+    )
+    segment.plain_text_content = build_script_plain_text(structured)
+    segment.segment_name = metadata.get("segment_title") or segment.segment_name
+    segment.scene_count = len(scenes)
+    segment.actual_word_count = count_words(segment.plain_text_content or "")
+
+
 def update_artifact(
     db: Session, artifact_id: int, payload: GenerationArtifactUpdate
 ) -> GenerationArtifactDetail | None:
@@ -438,6 +484,7 @@ def update_artifact(
         raise ValueError("该中间成果不可编辑")
     artifact.content = payload.content
     artifact.version += 1
+    sync_script_yaml_artifact_to_segment(db, artifact)
     db.commit()
     db.refresh(artifact)
     return get_artifact(db, artifact.id)
