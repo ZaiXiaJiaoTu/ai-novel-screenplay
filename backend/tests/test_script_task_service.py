@@ -4,12 +4,14 @@ import yaml
 
 from app.models.generation_task import GenerationTask
 from app.services.script_task_service import (
+    build_script_plain_text,
     build_placeholder_generation,
     build_generation_outputs,
     get_task_progress,
     parse_script_yaml_response,
     save_generated_script_to_shelf,
     strip_markdown_code_fence,
+    sync_script_yaml_artifact_to_segment,
 )
 
 
@@ -57,6 +59,20 @@ script:
     assert parsed is not None
     assert parsed["structured"]["script"]["metadata"]["title"] == "长夜来信"
     assert strip_markdown_code_fence(response).startswith("script:")
+
+
+def test_build_script_plain_text_uses_segment_and_scene_titles():
+    payload = {
+        "script": {
+            "metadata": {"segment_title": "第一集"},
+            "scenes": [
+                {"scene_id": "S1", "scene_title": "雨夜"},
+                {"scene_id": "S2", "scene_title": "旧楼"},
+            ],
+        }
+    }
+
+    assert build_script_plain_text(payload) == "第一集\nS1. 雨夜\nS2. 旧楼"
 
 
 def test_build_generation_outputs_falls_back_without_llm_config():
@@ -148,3 +164,44 @@ def test_save_generated_script_to_shelf_adds_project_and_segment():
     assert segment.book_id == 1
     assert segment.status == "completed"
     assert "script:" in segment.yaml_content
+
+
+def test_sync_script_yaml_artifact_to_segment_updates_latest_segment():
+    class FakeDb:
+        def __init__(self, task, segment):
+            self.task = task
+            self.segment = segment
+            self.scalar_calls = 0
+
+        def scalar(self, _stmt):
+            self.scalar_calls += 1
+            return self.task if self.scalar_calls == 1 else self.segment
+
+    task = SimpleNamespace(id=10, script_project_id=20)
+    segment = SimpleNamespace(
+        segment_name="旧名称",
+        yaml_content="",
+        plain_text_content="",
+        scene_count=0,
+        actual_word_count=0,
+    )
+    artifact = SimpleNamespace(
+        artifact_type="script_yaml",
+        task_id=10,
+        content={
+            "structured": {
+                "script": {
+                    "metadata": {"segment_title": "新版片段"},
+                    "scenes": [{"scene_id": "S1", "scene_title": "新场景"}],
+                }
+            }
+        },
+    )
+
+    sync_script_yaml_artifact_to_segment(FakeDb(task, segment), artifact)
+
+    assert segment.segment_name == "新版片段"
+    assert "script:" in segment.yaml_content
+    assert segment.plain_text_content == "新版片段\nS1. 新场景"
+    assert segment.scene_count == 1
+    assert segment.actual_word_count > 0
