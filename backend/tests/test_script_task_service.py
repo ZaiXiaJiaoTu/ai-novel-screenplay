@@ -5,8 +5,11 @@ import yaml
 from app.models.generation_task import GenerationTask
 from app.services.script_task_service import (
     build_placeholder_generation,
+    build_generation_outputs,
     get_task_progress,
+    parse_script_yaml_response,
     save_generated_script_to_shelf,
+    strip_markdown_code_fence,
 )
 
 
@@ -39,6 +42,70 @@ def test_task_progress_uses_status_and_step():
 
     task.status = "completed"
     assert get_task_progress(task) == 100
+
+
+def test_parse_script_yaml_response_accepts_markdown_fence():
+    response = """```yaml
+script:
+  metadata:
+    title: 长夜来信
+  scenes: []
+```"""
+
+    parsed = parse_script_yaml_response(response)
+
+    assert parsed is not None
+    assert parsed["structured"]["script"]["metadata"]["title"] == "长夜来信"
+    assert strip_markdown_code_fence(response).startswith("script:")
+
+
+def test_build_generation_outputs_falls_back_without_llm_config():
+    book = SimpleNamespace(id=1, title="长夜来信")
+    chapters = [SimpleNamespace(chapter_index=1, title="第1章 旧信", content="正文")]
+    task = SimpleNamespace(
+        id=10,
+        script_project_id=None,
+        adapt_scope={"type": "single_chapter", "chapter": 1},
+        generation_config={"style": "校园悬疑", "target_duration": 5},
+    )
+
+    generated = build_generation_outputs(SimpleNamespace(), book, chapters, task)
+
+    assert generated["style_strategy"]["source"] == "placeholder"
+    assert generated["scene_plan"]["source"] == "placeholder"
+    assert generated["script_yaml"]["source"] == "placeholder"
+
+
+def test_build_generation_outputs_uses_llm_when_available():
+    book = SimpleNamespace(id=1, title="长夜来信")
+    chapters = [SimpleNamespace(chapter_index=1, title="第1章 旧信", content="正文")]
+    task = SimpleNamespace(
+        id=10,
+        script_project_id=None,
+        adapt_scope={"type": "single_chapter", "chapter": 1},
+        generation_config={"style": "校园悬疑", "target_duration": 5},
+    )
+
+    def fake_call_llm(_db, *, task_type, variables, task_id):
+        assert variables["book_title"] == "长夜来信"
+        assert task_id == 10
+        if task_type == "script_yaml_generation":
+            return "script:\n  metadata:\n    title: LLM剧本\n  scenes: []\n"
+        return f"{task_type} result"
+
+    import app.services.script_task_service as service
+
+    old_call = service.call_llm_for_task
+    service.call_llm_for_task = fake_call_llm
+    try:
+        generated = service.build_generation_outputs(SimpleNamespace(), book, chapters, task)
+    finally:
+        service.call_llm_for_task = old_call
+
+    assert generated["style_strategy"]["source"] == "llm"
+    assert generated["scene_plan"]["source"] == "llm"
+    assert generated["script_yaml"]["source"] == "llm"
+    assert generated["script_yaml"]["structured"]["script"]["metadata"]["title"] == "LLM剧本"
 
 
 def test_save_generated_script_to_shelf_adds_project_and_segment():
