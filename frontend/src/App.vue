@@ -1,7 +1,7 @@
 <template>
   <el-container class="app-shell">
     <el-aside width="232px" class="sidebar">
-      <div class="brand">AI小说剧本改编</div>
+      <div class="brand">AI 小说剧本改编</div>
       <el-menu router :default-active="$route.path" class="nav-menu">
         <el-menu-item index="/">
           <el-icon><House /></el-icon>
