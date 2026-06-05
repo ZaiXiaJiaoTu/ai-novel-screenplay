@@ -58,3 +58,12 @@ async def validation_exception_handler(_request: Request, exc: RequestValidation
         status_code=422,
         content=fail("请求参数校验失败", code=422, data=exc.errors()),
     )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(_request: Request, exc: Exception):
+    detail = str(exc) if settings.env != "production" else "internal server error"
+    return JSONResponse(
+        status_code=500,
+        content=fail("internal server error", code=500, data={"detail": detail}),
+    )
