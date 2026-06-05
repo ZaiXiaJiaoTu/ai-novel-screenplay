@@ -167,6 +167,29 @@ body {
   white-space: pre-wrap;
 }
 
+.scripts-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.script-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.85fr);
+  gap: 18px;
+}
+
+.task-status-panel {
+  display: grid;
+  grid-template-columns: minmax(180px, 280px) minmax(220px, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+}
+
+.script-selected-title {
+  margin-bottom: 12px;
+}
+
 @media (max-width: 900px) {
   .book-workspace {
     grid-template-columns: 1fr;
@@ -194,5 +217,10 @@ body {
   .template-filters .el-select {
     max-width: none;
     width: 100%;
+  }
+
+  .script-workspace,
+  .task-status-panel {
+    grid-template-columns: 1fr;
   }
 }
