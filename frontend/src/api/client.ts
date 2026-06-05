@@ -58,6 +58,29 @@ export interface ChapterSummaryGenerationResult {
   summaries: ChapterSummaryDetail[];
 }
 
+export interface StoryProfileDetail {
+  profile_id: number;
+  book_id: number;
+  title: string | null;
+  genre: string | null;
+  overview: string | null;
+  world_setting: string | null;
+  main_conflict: string | null;
+  characters: unknown[] | null;
+  relationships: unknown[] | null;
+  key_events: unknown[] | null;
+  chapter_outlines: unknown[] | null;
+  clues: unknown[] | null;
+  tone: string | null;
+  locked_settings: unknown[] | Record<string, unknown> | null;
+  confirmed: boolean;
+  version: number;
+}
+
+export type StoryProfilePayload = Partial<
+  Omit<StoryProfileDetail, "profile_id" | "book_id" | "version">
+>;
+
 export interface LlmConfigDetail {
   config_id: number;
   provider: string;
@@ -250,6 +273,29 @@ export async function generateChapterSummaries(bookId: number) {
 export async function fetchChapterSummary(chapterId: number) {
   return unwrap(
     await apiClient.get<ApiEnvelope<ChapterSummaryDetail>>(`/chapters/${chapterId}/summary`)
+  );
+}
+
+export async function fetchStoryProfile(bookId: number) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<StoryProfileDetail>>(`/books/${bookId}/story-profile`)
+  );
+}
+
+export async function generateStoryProfile(bookId: number) {
+  return unwrap(
+    await apiClient.post<ApiEnvelope<StoryProfileDetail>>(
+      `/books/${bookId}/story-profile/generate`
+    )
+  );
+}
+
+export async function updateStoryProfile(bookId: number, payload: StoryProfilePayload) {
+  return unwrap(
+    await apiClient.put<ApiEnvelope<StoryProfileDetail>>(
+      `/books/${bookId}/story-profile`,
+      payload
+    )
   );
 }
 
