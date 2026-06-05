@@ -29,11 +29,20 @@
         <el-table-column label="操作" width="330" fixed="right">
           <template #default="{ row }">
             <el-button size="small" :icon="Edit" @click="openEditDialog(row)">编辑</el-button>
-            <el-button size="small" :icon="Connection" :loading="testingId === row.config_id" @click="runTest(row)">
+            <el-button
+              size="small"
+              :icon="Connection"
+              :loading="testingId === row.config_id"
+              @click="runTest(row)"
+            >
               测试
             </el-button>
-            <el-button size="small" :disabled="row.is_default" @click="markDefault(row)">设默认</el-button>
-            <el-button size="small" type="danger" :icon="Delete" @click="removeConfig(row)">删除</el-button>
+            <el-button size="small" :disabled="row.is_default" @click="markDefault(row)">
+              设默认
+            </el-button>
+            <el-button size="small" type="danger" :icon="Delete" @click="removeConfig(row)">
+              删除
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -159,6 +168,9 @@ async function loadConfigs() {
   loading.value = true;
   try {
     configs.value = await fetchLlmConfigs();
+  } catch {
+    configs.value = [];
+    ElMessage.error("模型配置加载失败，请检查后端服务和数据库连接");
   } finally {
     loading.value = false;
   }
@@ -228,15 +240,21 @@ async function saveConfig() {
     ElMessage.success("保存成功");
     dialogVisible.value = false;
     await loadConfigs();
+  } catch {
+    ElMessage.error("保存失败");
   } finally {
     saving.value = false;
   }
 }
 
 async function markDefault(config: LlmConfigDetail) {
-  await setDefaultLlmConfig(config.config_id);
-  ElMessage.success("已设为默认配置");
-  await loadConfigs();
+  try {
+    await setDefaultLlmConfig(config.config_id);
+    ElMessage.success("已设为默认配置");
+    await loadConfigs();
+  } catch {
+    ElMessage.error("默认配置更新失败");
+  }
 }
 
 async function runTest(config: LlmConfigDetail) {
@@ -244,18 +262,24 @@ async function runTest(config: LlmConfigDetail) {
   try {
     const result = await testLlmConfig(config.config_id);
     ElMessage.success(`测试通过，延迟 ${result.latency_ms} ms`);
+  } catch {
+    ElMessage.error("模型连接测试失败");
   } finally {
     testingId.value = null;
   }
 }
 
 async function removeConfig(config: LlmConfigDetail) {
-  await ElMessageBox.confirm(`确定删除 ${config.provider} / ${config.model_name}？`, "删除配置", {
-    type: "warning"
-  });
-  await deleteLlmConfig(config.config_id);
-  ElMessage.success("已删除配置");
-  await loadConfigs();
+  try {
+    await ElMessageBox.confirm(`确定删除 ${config.provider} / ${config.model_name}？`, "删除配置", {
+      type: "warning"
+    });
+    await deleteLlmConfig(config.config_id);
+    ElMessage.success("已删除配置");
+    await loadConfigs();
+  } catch {
+    ElMessage.info("删除操作已取消或失败");
+  }
 }
 
 onMounted(loadConfigs);
