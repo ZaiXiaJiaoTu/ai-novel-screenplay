@@ -205,6 +205,12 @@ body {
   margin-bottom: 12px;
 }
 
+.artifact-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .table-footer {
   display: flex;
   align-items: center;

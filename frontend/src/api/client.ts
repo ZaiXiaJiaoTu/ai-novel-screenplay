@@ -203,6 +203,11 @@ export interface GenerationArtifactListItem {
   editable: boolean;
 }
 
+export interface GenerationArtifactDetail extends GenerationArtifactListItem {
+  task_id: number;
+  content: Record<string, unknown> | unknown[] | null;
+}
+
 export interface ScriptProjectListItem {
   project_id: number;
   project_name: string;
@@ -431,6 +436,21 @@ export async function fetchTaskArtifacts(taskId: number) {
     await apiClient.get<ApiEnvelope<GenerationArtifactListItem[]>>(
       `/script-tasks/${taskId}/artifacts`
     )
+  );
+}
+
+export async function fetchArtifact(artifactId: number) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<GenerationArtifactDetail>>(`/artifacts/${artifactId}`)
+  );
+}
+
+export async function updateArtifact(
+  artifactId: number,
+  payload: { content: Record<string, unknown> | unknown[] }
+) {
+  return unwrap(
+    await apiClient.put<ApiEnvelope<GenerationArtifactDetail>>(`/artifacts/${artifactId}`, payload)
   );
 }
 

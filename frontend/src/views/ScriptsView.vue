@@ -163,8 +163,40 @@
         <el-table-column label="可编辑" width="90">
           <template #default="{ row }">{{ row.editable ? "是" : "否" }}</template>
         </el-table-column>
+        <el-table-column label="操作" width="90">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openArtifact(row)">查看</el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </el-drawer>
+
+    <el-dialog v-model="artifactDialogVisible" title="中间成果详情" width="920px">
+      <div v-if="selectedArtifact" class="artifact-editor">
+        <el-descriptions :column="3" border>
+          <el-descriptions-item label="类型">{{ selectedArtifact.artifact_type }}</el-descriptions-item>
+          <el-descriptions-item label="版本">v{{ selectedArtifact.version }}</el-descriptions-item>
+          <el-descriptions-item label="可编辑">{{ selectedArtifact.editable ? "是" : "否" }}</el-descriptions-item>
+        </el-descriptions>
+        <el-input
+          v-model="artifactEditContent"
+          type="textarea"
+          :rows="18"
+          :readonly="!selectedArtifact.editable"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="artifactDialogVisible = false">关闭</el-button>
+        <el-button
+          v-if="selectedArtifact?.editable"
+          type="primary"
+          :loading="savingArtifact"
+          @click="saveArtifact"
+        >
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -175,6 +207,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import {
   type BookListItem,
+  type GenerationArtifactDetail,
   type GenerationArtifactListItem,
   type ScriptProjectListItem,
   type ScriptSegmentDetail,
@@ -183,6 +216,7 @@ import {
   cancelScriptTask,
   createScriptTask,
   deleteScriptSegment,
+  fetchArtifact,
   fetchBooks,
   fetchScriptProjects,
   fetchScriptSegment,
@@ -193,6 +227,7 @@ import {
   scriptProjectDownloadUrl,
   scriptSegmentDownloadUrl,
   startScriptTask,
+  updateArtifact,
   updateScriptSegmentContent
 } from "@/api/client";
 
@@ -203,15 +238,19 @@ const artifacts = ref<GenerationArtifactListItem[]>([]);
 const selectedProject = ref<ScriptProjectListItem | null>(null);
 const currentTask = ref<ScriptTaskDetail | null>(null);
 const segmentDetail = ref<ScriptSegmentDetail | null>(null);
+const selectedArtifact = ref<GenerationArtifactDetail | null>(null);
 const loadingProjects = ref(false);
 const loadingSegments = ref(false);
 const creatingTask = ref(false);
 const savingSegment = ref(false);
+const savingArtifact = ref(false);
 const taskActionLoading = ref(false);
 const taskDialogVisible = ref(false);
 const segmentDialogVisible = ref(false);
 const artifactsVisible = ref(false);
+const artifactDialogVisible = ref(false);
 const segmentTab = ref("yaml");
+const artifactEditContent = ref("");
 const taskForm = reactive({
   book_id: undefined as number | undefined,
   script_type: "short_drama",
@@ -404,6 +443,50 @@ async function loadArtifacts() {
     artifactsVisible.value = true;
   } catch {
     ElMessage.error("中间成果加载失败");
+  }
+}
+
+async function openArtifact(artifact: GenerationArtifactListItem) {
+  try {
+    selectedArtifact.value = await fetchArtifact(artifact.artifact_id);
+    artifactEditContent.value = JSON.stringify(selectedArtifact.value.content ?? {}, null, 2);
+    artifactDialogVisible.value = true;
+  } catch {
+    ElMessage.error("中间成果详情加载失败");
+  }
+}
+
+async function saveArtifact() {
+  if (!selectedArtifact.value) {
+    return;
+  }
+  let parsedContent: Record<string, unknown> | unknown[];
+  try {
+    const parsed = JSON.parse(artifactEditContent.value) as unknown;
+    if (parsed === null || (typeof parsed !== "object" && !Array.isArray(parsed))) {
+      ElMessage.warning("中间成果内容必须是 JSON 对象或数组");
+      return;
+    }
+    parsedContent = parsed as Record<string, unknown> | unknown[];
+  } catch {
+    ElMessage.error("JSON 格式不正确，请检查后再保存");
+    return;
+  }
+
+  savingArtifact.value = true;
+  try {
+    selectedArtifact.value = await updateArtifact(selectedArtifact.value.artifact_id, {
+      content: parsedContent
+    });
+    artifactEditContent.value = JSON.stringify(selectedArtifact.value.content ?? {}, null, 2);
+    ElMessage.success("中间成果已保存");
+    if (currentTask.value) {
+      artifacts.value = await fetchTaskArtifacts(currentTask.value.task_id);
+    }
+  } catch {
+    ElMessage.error("中间成果保存失败");
+  } finally {
+    savingArtifact.value = false;
   }
 }
 
