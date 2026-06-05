@@ -4,10 +4,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
-from app.core.response import fail, success
+from app.core.response import fail
 from app.routers.book_router import router as book_router
 from app.routers.chapter_router import router as chapter_router
 from app.routers.export_router import router as export_router
+from app.routers.health_router import router as health_router
 from app.routers.llm_config_router import router as llm_config_router
 from app.routers.llm_log_router import router as llm_log_router
 from app.routers.prompt_template_router import router as prompt_template_router
@@ -40,6 +41,7 @@ app.include_router(export_router)
 app.include_router(llm_config_router)
 app.include_router(prompt_template_router)
 app.include_router(llm_log_router)
+app.include_router(health_router)
 
 
 @app.exception_handler(HTTPException)
@@ -55,15 +57,4 @@ async def validation_exception_handler(_request: Request, exc: RequestValidation
     return JSONResponse(
         status_code=422,
         content=fail("请求参数校验失败", code=422, data=exc.errors()),
-    )
-
-
-@app.get("/api/health")
-def health_check():
-    return success(
-        {
-            "status": "ok",
-            "service": settings.app_name,
-            "version": settings.app_version,
-        }
     )
