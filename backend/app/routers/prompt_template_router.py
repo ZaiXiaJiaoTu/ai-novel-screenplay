@@ -10,6 +10,7 @@ from app.services.prompt_template_service import (
     list_prompt_template_versions,
     list_prompt_templates,
     rollback_prompt_template,
+    seed_default_prompt_templates,
     update_prompt_template,
 )
 
@@ -36,6 +37,11 @@ def get_templates(
             )
         ]
     )
+
+
+@router.post("/seed-defaults")
+def seed_defaults(db: Session = Depends(get_db)):
+    return success([item.model_dump() for item in seed_default_prompt_templates(db)])
 
 
 @router.put("/{template_id}")
