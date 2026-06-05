@@ -10,7 +10,7 @@ const router = createRouter({
     { path: "/scripts", component: () => import("@/views/PlaceholderView.vue") },
     {
       path: "/settings/llm-configs",
-      component: () => import("@/views/PlaceholderView.vue")
+      component: () => import("@/views/LlmConfigsView.vue")
     }
   ]
 });
