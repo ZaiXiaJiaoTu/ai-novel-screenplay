@@ -128,6 +128,65 @@ export interface PromptTemplateVersionDetail {
   variables: string[] | null;
 }
 
+export interface ScriptTaskCreatePayload {
+  book_id: number;
+  project_id?: number | null;
+  adapt_scope: Record<string, unknown>;
+  generation_config: Record<string, unknown>;
+}
+
+export interface ScriptTaskCreateResult {
+  task_id: number;
+  status: string;
+}
+
+export interface ScriptTaskDetail {
+  task_id: number;
+  status: string;
+  current_step: string | null;
+  progress: number;
+  error_message: string | null;
+}
+
+export interface GenerationArtifactListItem {
+  artifact_id: number;
+  artifact_type: string;
+  version: number;
+  editable: boolean;
+}
+
+export interface ScriptProjectListItem {
+  project_id: number;
+  project_name: string;
+  book_title: string;
+  script_type: string | null;
+  default_style: string | null;
+  segment_count: number;
+}
+
+export interface ScriptProjectListResult {
+  records: ScriptProjectListItem[];
+  total: number;
+}
+
+export interface ScriptSegmentListItem {
+  segment_id: number;
+  segment_name: string;
+  style: string | null;
+  compression_level: string | null;
+  target_duration: number | null;
+  scene_count: number;
+  status: string;
+}
+
+export interface ScriptSegmentDetail extends ScriptSegmentListItem {
+  project_id: number;
+  book_id: number;
+  adapt_scope: Record<string, unknown> | null;
+  yaml_content: string | null;
+  plain_text_content: string | null;
+}
+
 function unwrap<T>(response: AxiosResponse<ApiEnvelope<T>>): T {
   return response.data.data;
 }
@@ -255,4 +314,75 @@ export async function rollbackPromptTemplate(templateId: number, versionId: numb
       `/prompt-templates/${templateId}/rollback/${versionId}`
     )
   );
+}
+
+export async function createScriptTask(payload: ScriptTaskCreatePayload) {
+  return unwrap(await apiClient.post<ApiEnvelope<ScriptTaskCreateResult>>("/script-tasks", payload));
+}
+
+export async function startScriptTask(taskId: number) {
+  return unwrap(await apiClient.post<ApiEnvelope<ScriptTaskDetail>>(`/script-tasks/${taskId}/start`));
+}
+
+export async function fetchScriptTask(taskId: number) {
+  return unwrap(await apiClient.get<ApiEnvelope<ScriptTaskDetail>>(`/script-tasks/${taskId}`));
+}
+
+export async function fetchTaskArtifacts(taskId: number) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<GenerationArtifactListItem[]>>(
+      `/script-tasks/${taskId}/artifacts`
+    )
+  );
+}
+
+export async function fetchScriptProjects(params?: {
+  keyword?: string;
+  script_type?: string;
+  page?: number;
+  size?: number;
+}) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<ScriptProjectListResult>>("/script-projects", { params })
+  );
+}
+
+export async function fetchScriptSegments(projectId: number) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<ScriptSegmentListItem[]>>(
+      `/script-projects/${projectId}/segments`
+    )
+  );
+}
+
+export async function fetchScriptSegment(segmentId: number) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<ScriptSegmentDetail>>(`/script-segments/${segmentId}`)
+  );
+}
+
+export async function updateScriptSegmentContent(
+  segmentId: number,
+  payload: { yaml_content?: string | null; plain_text_content?: string | null }
+) {
+  return unwrap(
+    await apiClient.put<ApiEnvelope<ScriptSegmentDetail>>(
+      `/script-segments/${segmentId}/content`,
+      payload
+    )
+  );
+}
+
+export async function deleteScriptSegment(segmentId: number) {
+  return unwrap(
+    await apiClient.delete<ApiEnvelope<{ deleted: boolean }>>(`/script-segments/${segmentId}`)
+  );
+}
+
+export function scriptSegmentDownloadUrl(segmentId: number, format: "yaml" | "txt") {
+  return `/api/script-segments/${segmentId}/download?format=${format}`;
+}
+
+export function scriptProjectDownloadUrl(projectId: number, format: "yaml" | "txt") {
+  return `/api/script-projects/${projectId}/download?format=${format}`;
 }

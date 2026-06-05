@@ -7,7 +7,7 @@ const router = createRouter({
   routes: [
     { path: "/", component: HomeView },
     { path: "/books", component: () => import("@/views/BooksView.vue") },
-    { path: "/scripts", component: () => import("@/views/PlaceholderView.vue") },
+    { path: "/scripts", component: () => import("@/views/ScriptsView.vue") },
     {
       path: "/settings/llm-configs",
       component: () => import("@/views/LlmConfigsView.vue")
