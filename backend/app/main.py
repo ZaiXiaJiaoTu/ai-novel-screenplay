@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.response import fail, success
 from app.routers.book_router import router as book_router
+from app.routers.chapter_router import router as chapter_router
 from app.routers.export_router import router as export_router
 from app.routers.llm_config_router import router as llm_config_router
 from app.routers.llm_log_router import router as llm_log_router
@@ -31,6 +32,7 @@ app.add_middleware(
 )
 
 app.include_router(book_router)
+app.include_router(chapter_router)
 app.include_router(story_profile_router)
 app.include_router(script_task_router)
 app.include_router(script_project_router)

@@ -19,6 +19,32 @@ DEFAULT_PROMPT_TEMPLATES = [
         "enabled": True,
     },
     {
+        "template_name": "默认章节摘要生成模板",
+        "task_type": "chapter_summary_generation",
+        "system_prompt": (
+            "你是小说改编预处理助手。你必须只输出 JSON，不要输出 Markdown 代码块或额外解释。"
+        ),
+        "user_prompt_template": (
+            "请根据以下章节内容生成章节摘要 JSON。\n"
+            "作品标题：{{book_title}}\n"
+            "小说篇幅类型：{{novel_type}}\n"
+            "章节序号：{{chapter_index}}\n"
+            "章节标题：{{chapter_title}}\n"
+            "章节正文：{{chapter_content}}\n\n"
+            "JSON 字段必须包含：summary、characters、key_events、locations、clues、emotion_changes。\n"
+            "characters、key_events、locations、clues、emotion_changes 必须是数组。"
+        ),
+        "output_format": "json",
+        "variables": [
+            "book_title",
+            "novel_type",
+            "chapter_index",
+            "chapter_title",
+            "chapter_content",
+        ],
+        "enabled": True,
+    },
+    {
         "template_name": "默认风格策略生成模板",
         "task_type": "style_strategy_generation",
         "system_prompt": "你是专业剧本改编策划，擅长把小说改编为结构清晰、风格统一的剧本。",
