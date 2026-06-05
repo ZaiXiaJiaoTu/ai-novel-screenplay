@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from app.services.prompt_template_service import serialize_template, serialize_version
+from app.prompts.default_prompts import DEFAULT_PROMPT_TEMPLATES
 
 
 def test_serialize_prompt_template():
@@ -38,3 +39,9 @@ def test_serialize_prompt_template_version():
 
     assert result.version_id == 10
     assert result.template_id == 1
+
+
+def test_default_prompt_template_names_are_unique():
+    names = [item["template_name"] for item in DEFAULT_PROMPT_TEMPLATES]
+
+    assert len(names) == len(set(names))

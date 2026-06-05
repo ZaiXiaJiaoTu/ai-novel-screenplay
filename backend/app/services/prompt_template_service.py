@@ -2,6 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.prompt_template import PromptTemplate, PromptTemplateVersion
+from app.prompts.default_prompts import DEFAULT_PROMPT_TEMPLATES
 from app.schemas.prompt_template_schema import (
     PromptTemplateCreate,
     PromptTemplateDetail,
@@ -59,6 +60,26 @@ def create_prompt_template(
     db.commit()
     db.refresh(template)
     return serialize_template(template)
+
+
+def seed_default_prompt_templates(db: Session) -> list[PromptTemplateDetail]:
+    created_templates: list[PromptTemplateDetail] = []
+    for prompt_data in DEFAULT_PROMPT_TEMPLATES:
+        existing = db.scalar(
+            select(PromptTemplate).where(
+                PromptTemplate.task_type == prompt_data["task_type"],
+                PromptTemplate.is_deleted.is_(False),
+            )
+        )
+        if existing is not None:
+            continue
+        template = PromptTemplate(**prompt_data, version=1, is_deleted=False)
+        db.add(template)
+        db.flush()
+        add_version(db, template)
+        created_templates.append(serialize_template(template))
+    db.commit()
+    return created_templates
 
 
 def list_prompt_templates(
