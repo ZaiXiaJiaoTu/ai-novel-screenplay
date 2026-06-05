@@ -40,6 +40,7 @@ def serialize_log_detail(log: LlmCallLog) -> LlmCallLogDetail:
 def list_llm_call_logs(
     db: Session,
     *,
+    task_id: int | None = None,
     task_type: str | None = None,
     status: str | None = None,
     start_time: datetime | None = None,
@@ -50,6 +51,9 @@ def list_llm_call_logs(
     stmt = select(LlmCallLog)
     count_stmt = select(func.count()).select_from(LlmCallLog)
 
+    if task_id:
+        stmt = stmt.where(LlmCallLog.task_id == task_id)
+        count_stmt = count_stmt.where(LlmCallLog.task_id == task_id)
     if task_type:
         stmt = stmt.where(LlmCallLog.task_type == task_type)
         count_stmt = count_stmt.where(LlmCallLog.task_type == task_type)

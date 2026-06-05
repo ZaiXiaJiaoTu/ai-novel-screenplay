@@ -35,6 +35,7 @@
         <el-button v-if="canRetryTask" type="primary" :loading="taskActionLoading" @click="retryTask">
           重新生成
         </el-button>
+        <el-button @click="openTaskLogs">查看日志</el-button>
         <el-button :icon="Document" @click="loadArtifacts">查看中间成果</el-button>
       </div>
     </section>
@@ -204,6 +205,7 @@
 import { Delete, Document, Refresh, VideoPlay } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
+import { useRouter } from "vue-router";
 
 import {
   type BookListItem,
@@ -231,6 +233,7 @@ import {
   updateScriptSegmentContent
 } from "@/api/client";
 
+const router = useRouter();
 const books = ref<BookListItem[]>([]);
 const projects = ref<ScriptProjectListItem[]>([]);
 const segments = ref<ScriptSegmentListItem[]>([]);
@@ -444,6 +447,16 @@ async function loadArtifacts() {
   } catch {
     ElMessage.error("中间成果加载失败");
   }
+}
+
+function openTaskLogs() {
+  if (!currentTask.value) {
+    return;
+  }
+  void router.push({
+    path: "/settings/llm-logs",
+    query: { task_id: String(currentTask.value.task_id) }
+  });
 }
 
 async function openArtifact(artifact: GenerationArtifactListItem) {

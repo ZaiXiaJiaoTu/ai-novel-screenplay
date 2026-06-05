@@ -335,6 +335,7 @@ export async function testLlmConfig(configId: number) {
 }
 
 export async function fetchLlmCallLogs(params?: {
+  task_id?: number;
   task_type?: string;
   status?: string;
   start_time?: string;

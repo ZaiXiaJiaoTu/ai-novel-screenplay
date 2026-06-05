@@ -1,7 +1,7 @@
 from datetime import datetime
 from types import SimpleNamespace
 
-from app.services.llm_log_service import serialize_log_detail, serialize_log_item
+from app.services.llm_log_service import list_llm_call_logs, serialize_log_detail, serialize_log_item
 
 
 def test_serialize_log_item_omits_summaries():
@@ -50,3 +50,30 @@ def test_serialize_log_detail_includes_summaries():
 
     assert result.request_summary == "request"
     assert result.error_message == "timeout"
+
+
+def test_list_llm_call_logs_filters_by_task_id():
+    class FakeScalars:
+        def all(self):
+            return []
+
+    class FakeDb:
+        def __init__(self):
+            self.list_stmt = None
+            self.count_stmt = None
+
+        def scalars(self, stmt):
+            self.list_stmt = stmt
+            return FakeScalars()
+
+        def scalar(self, stmt):
+            self.count_stmt = stmt
+            return 0
+
+    db = FakeDb()
+
+    result = list_llm_call_logs(db, task_id=7)
+
+    assert result.total == 0
+    assert "llm_call_logs.task_id" in str(db.list_stmt)
+    assert "llm_call_logs.task_id" in str(db.count_stmt)

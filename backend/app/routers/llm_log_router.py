@@ -12,6 +12,7 @@ router = APIRouter(prefix="/api/llm-call-logs", tags=["llm-call-logs"])
 
 @router.get("")
 def get_logs(
+    task_id: int | None = Query(default=None, ge=1),
     task_type: str | None = None,
     status: str | None = None,
     start_time: datetime | None = None,
@@ -23,6 +24,7 @@ def get_logs(
     return success(
         list_llm_call_logs(
             db,
+            task_id=task_id,
             task_type=task_type,
             status=status,
             start_time=start_time,

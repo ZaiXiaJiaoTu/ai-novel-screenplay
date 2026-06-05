@@ -17,6 +17,13 @@
           <el-option label="成功" value="success" />
           <el-option label="失败" value="failed" />
         </el-select>
+        <el-input-number
+          v-model="filters.task_id"
+          :min="1"
+          controls-position="right"
+          placeholder="任务 ID"
+          @change="resetAndLoad"
+        />
         <el-date-picker
           v-model="filters.timeRange"
           type="datetimerange"
@@ -94,6 +101,7 @@
 import { Refresh } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import { onMounted, reactive, ref } from "vue";
+import { useRoute } from "vue-router";
 
 import {
   type LlmCallLogDetail,
@@ -111,6 +119,7 @@ const taskOptions = [
   "yaml_repair"
 ];
 
+const route = useRoute();
 const logs = ref<LlmCallLogListItem[]>([]);
 const selectedLog = ref<LlmCallLogDetail | null>(null);
 const loading = ref(false);
@@ -121,17 +130,28 @@ const total = ref(0);
 const filters = reactive<{
   task_type: string;
   status: string;
+  task_id: number | undefined;
   timeRange: [string, string] | null;
 }>({
   task_type: "",
   status: "",
+  task_id: undefined,
   timeRange: null
 });
+
+function readTaskIdQuery() {
+  const rawTaskId = Array.isArray(route.query.task_id)
+    ? route.query.task_id[0]
+    : route.query.task_id;
+  const parsedTaskId = Number(rawTaskId);
+  filters.task_id = Number.isInteger(parsedTaskId) && parsedTaskId > 0 ? parsedTaskId : undefined;
+}
 
 async function loadLogs() {
   loading.value = true;
   try {
     const result = await fetchLlmCallLogs({
+      task_id: filters.task_id,
       task_type: filters.task_type || undefined,
       status: filters.status || undefined,
       start_time: filters.timeRange?.[0],
@@ -164,5 +184,8 @@ async function openLog(log: LlmCallLogListItem) {
   }
 }
 
-onMounted(loadLogs);
+onMounted(() => {
+  readTaskIdQuery();
+  void loadLogs();
+});
 </script>
