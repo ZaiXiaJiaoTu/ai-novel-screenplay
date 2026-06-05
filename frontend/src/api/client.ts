@@ -96,6 +96,31 @@ export interface LlmConfigTestResult {
   status: string;
 }
 
+export interface LlmCallLogListItem {
+  log_id: number;
+  task_id: number | null;
+  llm_config_id: number | null;
+  prompt_template_id: number | null;
+  task_type: string;
+  status: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  latency_ms: number | null;
+  created_at: string;
+}
+
+export interface LlmCallLogListResult {
+  records: LlmCallLogListItem[];
+  total: number;
+}
+
+export interface LlmCallLogDetail extends LlmCallLogListItem {
+  request_summary: string | null;
+  response_summary: string | null;
+  error_message: string | null;
+}
+
 export interface PromptTemplateDetail {
   template_id: number;
   template_name: string;
@@ -255,6 +280,25 @@ export async function setDefaultLlmConfig(configId: number) {
 export async function testLlmConfig(configId: number) {
   return unwrap(
     await apiClient.post<ApiEnvelope<LlmConfigTestResult>>(`/llm-configs/${configId}/test`)
+  );
+}
+
+export async function fetchLlmCallLogs(params?: {
+  task_type?: string;
+  status?: string;
+  start_time?: string;
+  end_time?: string;
+  page?: number;
+  size?: number;
+}) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<LlmCallLogListResult>>("/llm-call-logs", { params })
+  );
+}
+
+export async function fetchLlmCallLog(logId: number) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<LlmCallLogDetail>>(`/llm-call-logs/${logId}`)
   );
 }
 

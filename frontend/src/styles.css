@@ -190,6 +190,36 @@ body {
   margin-bottom: 12px;
 }
 
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.log-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.log-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.log-block pre {
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #334155;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 900px) {
   .book-workspace {
     grid-template-columns: 1fr;
@@ -222,5 +252,14 @@ body {
   .script-workspace,
   .task-status-panel {
     grid-template-columns: 1fr;
+  }
+
+  .table-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .log-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

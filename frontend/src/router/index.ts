@@ -15,6 +15,10 @@ const router = createRouter({
     {
       path: "/settings/prompt-templates",
       component: () => import("@/views/PromptTemplatesView.vue")
+    },
+    {
+      path: "/settings/llm-logs",
+      component: () => import("@/views/LlmLogsView.vue")
     }
   ]
 });

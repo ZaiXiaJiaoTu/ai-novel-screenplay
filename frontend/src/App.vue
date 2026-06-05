@@ -23,6 +23,10 @@
           <el-icon><Tickets /></el-icon>
           <span>提示词模板</span>
         </el-menu-item>
+        <el-menu-item index="/settings/llm-logs">
+          <el-icon><DataLine /></el-icon>
+          <span>调用日志</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
@@ -35,5 +39,12 @@
 </template>
 
 <script setup lang="ts">
-import { Collection, Document, House, Setting, Tickets } from "@element-plus/icons-vue";
+import {
+  Collection,
+  DataLine,
+  Document,
+  House,
+  Setting,
+  Tickets
+} from "@element-plus/icons-vue";
 </script>
