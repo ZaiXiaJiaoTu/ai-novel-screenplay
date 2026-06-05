@@ -58,6 +58,44 @@ export interface ChapterSummaryGenerationResult {
   summaries: ChapterSummaryDetail[];
 }
 
+export interface LlmConfigDetail {
+  config_id: number;
+  provider: string;
+  base_url: string;
+  model_name: string;
+  temperature: string | number | null;
+  top_p: string | number | null;
+  max_tokens: number | null;
+  timeout_seconds: number;
+  retry_count: number;
+  task_scope: string[] | null;
+  enabled: boolean;
+  api_key_masked: string;
+  is_default: boolean;
+}
+
+export interface LlmConfigPayload {
+  provider: string;
+  base_url: string;
+  api_key?: string;
+  model_name: string;
+  temperature?: number | null;
+  top_p?: number | null;
+  max_tokens?: number | null;
+  timeout_seconds: number;
+  retry_count: number;
+  task_scope?: string[] | null;
+  enabled: boolean;
+  is_default?: boolean;
+}
+
+export interface LlmConfigTestResult {
+  provider: string;
+  model_name: string;
+  latency_ms: number;
+  status: string;
+}
+
 function unwrap<T>(response: AxiosResponse<ApiEnvelope<T>>): T {
   return response.data.data;
 }
@@ -96,5 +134,35 @@ export async function generateChapterSummaries(bookId: number) {
 export async function fetchChapterSummary(chapterId: number) {
   return unwrap(
     await apiClient.get<ApiEnvelope<ChapterSummaryDetail>>(`/chapters/${chapterId}/summary`)
+  );
+}
+
+export async function fetchLlmConfigs() {
+  return unwrap(await apiClient.get<ApiEnvelope<LlmConfigDetail[]>>("/llm-configs"));
+}
+
+export async function createLlmConfig(payload: LlmConfigPayload & { api_key: string }) {
+  return unwrap(await apiClient.post<ApiEnvelope<LlmConfigDetail>>("/llm-configs", payload));
+}
+
+export async function updateLlmConfig(configId: number, payload: Partial<LlmConfigPayload>) {
+  return unwrap(
+    await apiClient.put<ApiEnvelope<LlmConfigDetail>>(`/llm-configs/${configId}`, payload)
+  );
+}
+
+export async function deleteLlmConfig(configId: number) {
+  return unwrap(await apiClient.delete<ApiEnvelope<{ deleted: boolean }>>(`/llm-configs/${configId}`));
+}
+
+export async function setDefaultLlmConfig(configId: number) {
+  return unwrap(
+    await apiClient.post<ApiEnvelope<LlmConfigDetail>>(`/llm-configs/${configId}/default`)
+  );
+}
+
+export async function testLlmConfig(configId: number) {
+  return unwrap(
+    await apiClient.post<ApiEnvelope<LlmConfigTestResult>>(`/llm-configs/${configId}/test`)
   );
 }

@@ -106,14 +106,50 @@ body {
   margin-top: 14px;
 }
 
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-panel {
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 18px;
+}
+
+.settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.settings-switches {
+  display: flex;
+  gap: 18px;
+}
+
 @media (max-width: 900px) {
   .book-workspace {
     grid-template-columns: 1fr;
   }
 
   .books-header,
-  .chapter-toolbar {
+  .chapter-toolbar,
+  .settings-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .settings-form-grid {
+    grid-template-columns: 1fr;
   }
 }
