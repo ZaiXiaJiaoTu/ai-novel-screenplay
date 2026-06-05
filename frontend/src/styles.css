@@ -220,6 +220,19 @@ body {
   white-space: pre-wrap;
 }
 
+.profile-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.profile-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 @media (max-width: 900px) {
   .book-workspace {
     grid-template-columns: 1fr;
@@ -261,5 +274,9 @@ body {
 
   .log-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .profile-toolbar {
+    flex-direction: column;
   }
 }
