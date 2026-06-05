@@ -65,7 +65,18 @@ python -m venv .venv
 健康检查：`http://127.0.0.1:8000/api/health`
 OpenAPI 文档：`http://127.0.0.1:8000/api/docs`
 
-### 4. 启动前端
+### 4. 可选：初始化演示数据
+
+如果希望快速看到完整演示内容，可以在数据库初始化后执行：
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m app.scripts.seed_demo_data
+```
+
+该命令会幂等创建一套演示小说、章节摘要、故事设定档案和已生成的剧本项目。
+
+### 5. 启动前端
 
 ```powershell
 cd frontend
