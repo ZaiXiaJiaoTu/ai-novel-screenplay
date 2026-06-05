@@ -1,3 +1,4 @@
+import yaml
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -5,6 +6,7 @@ from app.models.book import Book
 from app.models.chapter import Chapter
 from app.models.story_profile import StoryProfile
 from app.schemas.story_profile_schema import StoryProfileDetail, StoryProfileUpdate
+from app.services.llm_service import LlmServiceError, call_llm_for_task
 
 
 def build_initial_story_profile(book: Book, chapters: list[Chapter]) -> StoryProfile:
@@ -56,6 +58,56 @@ def serialize_story_profile(profile: StoryProfile) -> StoryProfileDetail:
     )
 
 
+def build_story_profile_variables(book: Book, chapters: list[Chapter]) -> dict:
+    return {
+        "book_title": book.title,
+        "novel_type": book.novel_type,
+        "chapters": [
+            {
+                "chapter_index": chapter.chapter_index,
+                "title": chapter.title,
+                "content": chapter.content[:3000],
+            }
+            for chapter in chapters
+        ],
+    }
+
+
+def parse_story_profile_response(response_text: str) -> dict | None:
+    stripped = response_text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    try:
+        parsed = yaml.safe_load(stripped)
+    except yaml.YAMLError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def apply_story_profile_payload(profile: StoryProfile, payload: dict) -> None:
+    for field_name in [
+        "title",
+        "genre",
+        "overview",
+        "world_setting",
+        "main_conflict",
+        "characters",
+        "relationships",
+        "key_events",
+        "chapter_outlines",
+        "clues",
+        "tone",
+        "locked_settings",
+    ]:
+        if field_name in payload:
+            setattr(profile, field_name, payload[field_name])
+
+
 def get_or_create_story_profile(db: Session, book_id: int) -> StoryProfileDetail | None:
     book = db.scalar(select(Book).where(Book.id == book_id, Book.is_deleted.is_(False)))
     if book is None:
@@ -74,6 +126,48 @@ def get_or_create_story_profile(db: Session, book_id: int) -> StoryProfileDetail
         db.commit()
         db.refresh(profile)
 
+    return serialize_story_profile(profile)
+
+
+def generate_story_profile(db: Session, book_id: int) -> StoryProfileDetail | None:
+    book = db.scalar(select(Book).where(Book.id == book_id, Book.is_deleted.is_(False)))
+    if book is None:
+        return None
+
+    chapters = db.scalars(
+        select(Chapter)
+        .where(Chapter.book_id == book_id, Chapter.is_deleted.is_(False))
+        .order_by(Chapter.chapter_index)
+    ).all()
+    profile = db.scalar(select(StoryProfile).where(StoryProfile.book_id == book_id))
+    if profile is None:
+        profile = build_initial_story_profile(book, list(chapters))
+        db.add(profile)
+        db.flush()
+
+    try:
+        response_text = call_llm_for_task(
+            db,
+            task_type="story_profile_generation",
+            variables=build_story_profile_variables(book, list(chapters)),
+        )
+        parsed_payload = parse_story_profile_response(response_text)
+        if parsed_payload:
+            apply_story_profile_payload(profile, parsed_payload)
+            profile.version += 1
+            profile.confirmed = False
+            book.story_profile_status = "generated"
+        else:
+            book.story_profile_status = "failed"
+            profile.overview = profile.overview or "故事设定档案生成失败，请手动完善。"
+    except LlmServiceError:
+        book.story_profile_status = "generated"
+    except Exception:
+        book.story_profile_status = "failed"
+        profile.overview = profile.overview or "故事设定档案生成失败，请手动完善。"
+
+    db.commit()
+    db.refresh(profile)
     return serialize_story_profile(profile)
 
 
