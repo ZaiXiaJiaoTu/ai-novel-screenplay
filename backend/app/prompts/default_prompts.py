@@ -1,5 +1,24 @@
 DEFAULT_PROMPT_TEMPLATES = [
     {
+        "template_name": "默认故事设定档案生成模板",
+        "task_type": "story_profile_generation",
+        "system_prompt": (
+            "你是小说改编策划助手。你必须只输出 JSON，不要输出 Markdown 代码块或额外解释。"
+        ),
+        "user_prompt_template": (
+            "请根据以下小说信息生成故事设定档案 JSON。\n"
+            "作品标题：{{book_title}}\n"
+            "小说篇幅类型：{{novel_type}}\n"
+            "章节内容：{{chapters}}\n\n"
+            "JSON 字段必须包含：title、genre、overview、world_setting、main_conflict、"
+            "characters、relationships、key_events、chapter_outlines、clues、tone、locked_settings。\n"
+            "characters、relationships、key_events、chapter_outlines、clues、locked_settings 必须是数组。"
+        ),
+        "output_format": "json",
+        "variables": ["book_title", "novel_type", "chapters"],
+        "enabled": True,
+    },
+    {
         "template_name": "默认风格策略生成模板",
         "task_type": "style_strategy_generation",
         "system_prompt": "你是专业剧本改编策划，擅长把小说改编为结构清晰、风格统一的剧本。",
