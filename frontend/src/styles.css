@@ -137,6 +137,36 @@ body {
   gap: 18px;
 }
 
+.settings-actions,
+.template-filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.template-filters {
+  margin-bottom: 16px;
+}
+
+.template-filters .el-input,
+.template-filters .el-select {
+  max-width: 260px;
+}
+
+.version-preview {
+  margin-top: 16px;
+}
+
+.version-preview pre {
+  margin: 0 0 12px;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #334155;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 900px) {
   .book-workspace {
     grid-template-columns: 1fr;
@@ -151,5 +181,18 @@ body {
 
   .settings-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-actions,
+  .template-filters {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .template-filters .el-input,
+  .template-filters .el-select {
+    max-width: none;
+    width: 100%;
   }
 }
