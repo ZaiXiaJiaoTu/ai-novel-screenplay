@@ -1,0 +1,62 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: #1f2937;
+  background: #f4f6f8;
+  font-family:
+    Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.sidebar {
+  border-right: 1px solid #d7dde5;
+  background: #ffffff;
+}
+
+.brand {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  font-size: 16px;
+  font-weight: 700;
+  border-bottom: 1px solid #d7dde5;
+}
+
+.nav-menu {
+  border-right: 0;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #d7dde5;
+  background: #ffffff;
+  font-weight: 600;
+}
+
+.main-panel {
+  padding: 24px;
+}
+
+.page-header {
+  margin-bottom: 20px;
+}
+
+.page-title {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.page-subtitle {
+  margin: 0;
+  color: #667085;
+  line-height: 1.6;
+}
