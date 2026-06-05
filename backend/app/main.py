@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.response import fail, success
 from app.routers.book_router import router as book_router
+from app.routers.script_project_router import router as script_project_router
 from app.routers.script_task_router import router as script_task_router
 from app.routers.story_profile_router import router as story_profile_router
 
@@ -28,6 +29,7 @@ app.add_middleware(
 app.include_router(book_router)
 app.include_router(story_profile_router)
 app.include_router(script_task_router)
+app.include_router(script_project_router)
 
 
 @app.exception_handler(HTTPException)

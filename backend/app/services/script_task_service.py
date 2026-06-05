@@ -1,4 +1,4 @@
-from datetime import datetime
+﻿from datetime import datetime
 
 import yaml
 from sqlalchemy import select
@@ -8,6 +8,7 @@ from app.models.book import Book
 from app.models.chapter import Chapter
 from app.models.generation_task import GenerationArtifact, GenerationTask
 from app.models.script_project import ScriptProject
+from app.models.script_segment import ScriptSegment
 from app.schemas.script_task_schema import (
     GenerationArtifactDetail,
     GenerationArtifactListItem,
@@ -16,6 +17,7 @@ from app.schemas.script_task_schema import (
     ScriptTaskCreateResult,
     ScriptTaskDetail,
 )
+from app.utils.chapter_parser import count_words
 
 
 STEP_PROGRESS = {
@@ -134,6 +136,69 @@ def build_placeholder_generation(book: Book, chapters: list[Chapter], task: Gene
     }
 
 
+def save_generated_script_to_shelf(
+    db: Session,
+    *,
+    task: GenerationTask,
+    book: Book,
+    generated: dict,
+) -> ScriptSegment:
+    generation_config = task.generation_config or {}
+    script_yaml = generated["script_yaml"]
+    structured = script_yaml["structured"]["script"]
+    metadata = structured["metadata"]
+    scenes = structured.get("scenes") or []
+
+    project = None
+    if task.script_project_id is not None:
+        project = db.scalar(
+            select(ScriptProject).where(
+                ScriptProject.id == task.script_project_id,
+                ScriptProject.is_deleted.is_(False),
+            )
+        )
+
+    if project is None:
+        project = ScriptProject(
+            book_id=book.id,
+            project_name=metadata["title"],
+            script_type=metadata.get("script_type"),
+            default_style=metadata.get("style"),
+            default_compression_level=metadata.get("compression_level"),
+            default_target_duration=metadata.get("target_duration"),
+            status="ongoing",
+        )
+        db.add(project)
+        db.flush()
+        task.script_project_id = project.id
+
+    plain_text = "\n".join(
+        [
+            metadata.get("segment_title") or metadata.get("title") or "剧本片段",
+            *[
+                f"{scene.get('scene_id', '')}. {scene.get('scene_title', '')}".strip()
+                for scene in scenes
+            ],
+        ]
+    ).strip()
+    segment = ScriptSegment(
+        project_id=project.id,
+        book_id=book.id,
+        segment_name=metadata.get("segment_title") or "剧本片段",
+        adapt_scope=task.adapt_scope,
+        style_source="inherit_project",
+        style=generation_config.get("style") or project.default_style,
+        compression_level=generation_config.get("compression_level"),
+        target_duration=generation_config.get("target_duration"),
+        actual_word_count=count_words(plain_text),
+        scene_count=len(scenes),
+        yaml_content=script_yaml["yaml"],
+        plain_text_content=plain_text,
+        status="completed",
+    )
+    db.add(segment)
+    return segment
+
 def start_script_task(db: Session, task_id: int) -> ScriptTaskDetail | None:
     task = db.scalar(select(GenerationTask).where(GenerationTask.id == task_id))
     if task is None:
@@ -176,6 +241,7 @@ def start_script_task(db: Session, task_id: int) -> ScriptTaskDetail | None:
         )
 
     task.current_step = "save_script"
+    save_generated_script_to_shelf(db, task=task, book=book, generated=generated)
     task.status = "completed"
     task.finished_at = datetime.utcnow()
     db.commit()
