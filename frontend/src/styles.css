@@ -186,6 +186,21 @@ body {
   gap: 16px;
 }
 
+.task-status-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #667085;
+  line-height: 1.6;
+}
+
+.task-progress-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
 .script-selected-title {
   margin-bottom: 12px;
 }

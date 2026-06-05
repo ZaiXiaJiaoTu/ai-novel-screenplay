@@ -418,6 +418,14 @@ export async function fetchScriptTask(taskId: number) {
   return unwrap(await apiClient.get<ApiEnvelope<ScriptTaskDetail>>(`/script-tasks/${taskId}`));
 }
 
+export async function cancelScriptTask(taskId: number) {
+  return unwrap(await apiClient.post<ApiEnvelope<ScriptTaskDetail>>(`/script-tasks/${taskId}/cancel`));
+}
+
+export async function retryScriptTask(taskId: number) {
+  return unwrap(await apiClient.post<ApiEnvelope<ScriptTaskDetail>>(`/script-tasks/${taskId}/retry`));
+}
+
 export async function fetchTaskArtifacts(taskId: number) {
   return unwrap(
     await apiClient.get<ApiEnvelope<GenerationArtifactListItem[]>>(

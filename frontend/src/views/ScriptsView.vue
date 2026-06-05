@@ -14,14 +14,27 @@
     <section v-if="currentTask" class="settings-panel task-status-panel">
       <div>
         <div class="panel-title">最近任务 #{{ currentTask.task_id }}</div>
-        <p class="page-subtitle">
-          {{ currentTask.status }} / {{ currentTask.current_step || "等待中" }}
-          <span v-if="currentTask.error_message"> / {{ currentTask.error_message }}</span>
-        </p>
+        <div class="task-status-line">
+          <el-tag :type="taskStatusType">{{ taskStatusLabel }}</el-tag>
+          <span>{{ currentTask.current_step || "等待中" }}</span>
+        </div>
       </div>
-      <el-progress :percentage="currentTask.progress" :status="currentTask.status === 'failed' ? 'exception' : undefined" />
+      <div class="task-progress-block">
+        <el-progress :percentage="currentTask.progress" :status="taskProgressStatus" />
+        <el-alert
+          v-if="currentTask.error_message"
+          type="error"
+          :title="currentTask.error_message"
+          :closable="false"
+          show-icon
+        />
+      </div>
       <div class="settings-actions">
-        <el-button :icon="Refresh" @click="refreshTask">刷新任务</el-button>
+        <el-button :icon="Refresh" :loading="taskActionLoading" @click="refreshTask">刷新任务</el-button>
+        <el-button v-if="canCancelTask" :loading="taskActionLoading" @click="cancelTask">取消任务</el-button>
+        <el-button v-if="canRetryTask" type="primary" :loading="taskActionLoading" @click="retryTask">
+          重新生成
+        </el-button>
         <el-button :icon="Document" @click="loadArtifacts">查看中间成果</el-button>
       </div>
     </section>
@@ -158,7 +171,7 @@
 <script setup lang="ts">
 import { Delete, Document, Refresh, VideoPlay } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 
 import {
   type BookListItem,
@@ -167,6 +180,7 @@ import {
   type ScriptSegmentDetail,
   type ScriptSegmentListItem,
   type ScriptTaskDetail,
+  cancelScriptTask,
   createScriptTask,
   deleteScriptSegment,
   fetchBooks,
@@ -175,6 +189,7 @@ import {
   fetchScriptSegments,
   fetchScriptTask,
   fetchTaskArtifacts,
+  retryScriptTask,
   scriptProjectDownloadUrl,
   scriptSegmentDownloadUrl,
   startScriptTask,
@@ -192,6 +207,7 @@ const loadingProjects = ref(false);
 const loadingSegments = ref(false);
 const creatingTask = ref(false);
 const savingSegment = ref(false);
+const taskActionLoading = ref(false);
 const taskDialogVisible = ref(false);
 const segmentDialogVisible = ref(false);
 const artifactsVisible = ref(false);
@@ -209,6 +225,53 @@ const segmentEdit = reactive({
   yaml_content: "",
   plain_text_content: ""
 });
+
+const taskStatusLabels: Record<string, string> = {
+  pending: "等待中",
+  running: "生成中",
+  completed: "已完成",
+  failed: "失败",
+  canceled: "已取消"
+};
+
+const taskStatusLabel = computed(() => {
+  if (!currentTask.value) {
+    return "";
+  }
+  return taskStatusLabels[currentTask.value.status] || currentTask.value.status;
+});
+
+const taskStatusType = computed(() => {
+  if (currentTask.value?.status === "completed") {
+    return "success";
+  }
+  if (currentTask.value?.status === "failed") {
+    return "danger";
+  }
+  if (currentTask.value?.status === "canceled") {
+    return "warning";
+  }
+  return "info";
+});
+
+const taskProgressStatus = computed(() => {
+  if (currentTask.value?.status === "completed") {
+    return "success";
+  }
+  if (currentTask.value?.status === "failed") {
+    return "exception";
+  }
+  if (currentTask.value?.status === "canceled") {
+    return "warning";
+  }
+  return undefined;
+});
+
+const canCancelTask = computed(() => {
+  return currentTask.value ? ["pending", "running"].includes(currentTask.value.status) : false;
+});
+
+const canRetryTask = computed(() => currentTask.value?.status === "failed");
 
 async function loadBooks() {
   try {
@@ -287,10 +350,48 @@ async function refreshTask() {
   if (!currentTask.value) {
     return;
   }
+  taskActionLoading.value = true;
   try {
     currentTask.value = await fetchScriptTask(currentTask.value.task_id);
   } catch {
     ElMessage.error("任务状态刷新失败");
+  } finally {
+    taskActionLoading.value = false;
+  }
+}
+
+async function cancelTask() {
+  if (!currentTask.value) {
+    return;
+  }
+  try {
+    await ElMessageBox.confirm("确定取消当前剧本生成任务？", "取消任务", {
+      type: "warning"
+    });
+    taskActionLoading.value = true;
+    currentTask.value = await cancelScriptTask(currentTask.value.task_id);
+    ElMessage.success("任务已取消");
+  } catch {
+    ElMessage.info("取消操作已放弃或失败");
+  } finally {
+    taskActionLoading.value = false;
+  }
+}
+
+async function retryTask() {
+  if (!currentTask.value) {
+    return;
+  }
+  taskActionLoading.value = true;
+  try {
+    const pendingTask = await retryScriptTask(currentTask.value.task_id);
+    currentTask.value = await startScriptTask(pendingTask.task_id);
+    ElMessage.success("任务已重新生成");
+    await loadProjects();
+  } catch {
+    ElMessage.error("重新生成失败，请检查模型配置或后端日志");
+  } finally {
+    taskActionLoading.value = false;
   }
 }
 
