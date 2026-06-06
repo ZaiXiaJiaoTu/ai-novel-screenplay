@@ -38,48 +38,16 @@ export interface ChapterListItem {
   word_count: number;
 }
 
-export interface ChapterSummaryDetail {
-  summary_id: number;
+export interface ChapterDetail extends ChapterListItem {
   book_id: number;
-  chapter_id: number;
-  chapter_index: number;
-  chapter_title: string;
-  summary: string | null;
-  characters: unknown[];
-  key_events: unknown[];
-  locations: unknown[];
-  clues: unknown[];
-  emotion_changes: unknown[];
+  content: string;
 }
 
-export interface ChapterSummaryGenerationResult {
-  book_id: number;
-  generated_count: number;
-  summaries: ChapterSummaryDetail[];
+export interface ChapterPayload {
+  title: string;
+  content: string;
+  chapter_index?: number;
 }
-
-export interface StoryProfileDetail {
-  profile_id: number;
-  book_id: number;
-  title: string | null;
-  genre: string | null;
-  overview: string | null;
-  world_setting: string | null;
-  main_conflict: string | null;
-  characters: unknown[] | null;
-  relationships: unknown[] | null;
-  key_events: unknown[] | null;
-  chapter_outlines: unknown[] | null;
-  clues: unknown[] | null;
-  tone: string | null;
-  locked_settings: unknown[] | Record<string, unknown> | null;
-  confirmed: boolean;
-  version: number;
-}
-
-export type StoryProfilePayload = Partial<
-  Omit<StoryProfileDetail, "profile_id" | "book_id" | "version">
->;
 
 export interface LlmConfigDetail {
   config_id: number;
@@ -280,39 +248,31 @@ export async function fetchBookChapters(bookId: number) {
   );
 }
 
-export async function generateChapterSummaries(bookId: number) {
+export async function fetchChapter(chapterId: number) {
   return unwrap(
-    await apiClient.post<ApiEnvelope<ChapterSummaryGenerationResult>>(
-      `/books/${bookId}/chapter-summaries/generate`
-    )
+    await apiClient.get<ApiEnvelope<ChapterDetail>>(`/chapters/${chapterId}`)
   );
 }
 
-export async function fetchChapterSummary(chapterId: number) {
+export async function createChapter(bookId: number, payload: ChapterPayload) {
   return unwrap(
-    await apiClient.get<ApiEnvelope<ChapterSummaryDetail>>(`/chapters/${chapterId}/summary`)
+    await apiClient.post<ApiEnvelope<ChapterDetail>>(`/books/${bookId}/chapters`, payload)
   );
 }
 
-export async function fetchStoryProfile(bookId: number) {
+export async function updateChapter(
+  chapterId: number,
+  payload: Partial<Omit<ChapterPayload, "chapter_index">>
+) {
   return unwrap(
-    await apiClient.get<ApiEnvelope<StoryProfileDetail>>(`/books/${bookId}/story-profile`)
+    await apiClient.put<ApiEnvelope<ChapterDetail>>(`/chapters/${chapterId}`, payload)
   );
 }
 
-export async function generateStoryProfile(bookId: number) {
+export async function deleteChapter(chapterId: number) {
   return unwrap(
-    await apiClient.post<ApiEnvelope<StoryProfileDetail>>(
-      `/books/${bookId}/story-profile/generate`
-    )
-  );
-}
-
-export async function updateStoryProfile(bookId: number, payload: StoryProfilePayload) {
-  return unwrap(
-    await apiClient.put<ApiEnvelope<StoryProfileDetail>>(
-      `/books/${bookId}/story-profile`,
-      payload
+    await apiClient.delete<ApiEnvelope<{ chapter_id: number; deleted: boolean }>>(
+      `/chapters/${chapterId}`
     )
   );
 }
