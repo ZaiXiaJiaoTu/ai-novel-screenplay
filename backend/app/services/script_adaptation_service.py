@@ -914,12 +914,14 @@ def build_episode_variables(
     project: ScriptProject,
     book_title: str,
     events: list[ScriptPlotEvent],
+    episode_number: int,
 ) -> dict:
     characters = get_characters(db, project.id) or []
     chapters = get_event_source_chapters(db, project, events)
     return {
         "book_title": book_title,
         "adaptation_config": build_adaptation_config(project),
+        "episode_number": episode_number,
         "events": [serialize_event(event).model_dump() for event in events],
         "characters": [character.model_dump() for character in characters],
         "chapters": [
@@ -1008,11 +1010,7 @@ def fallback_episode_payload(
     return {
         "script": {
             "metadata": {
-                "episode_index": episode_index,
                 "title": f"第 {episode_index} 集",
-                "source_book_title": book_title,
-                "script_type": project.script_type,
-                "target_duration": project.default_target_duration,
             },
             "scenes": [
                 {
@@ -1030,6 +1028,81 @@ def fallback_episode_payload(
             ],
         }
     }
+
+
+def get_episode_format(project: ScriptProject) -> str:
+    metadata = (project.yaml_schema_delta or {}).get("metadata") or {}
+    value = metadata.get("format")
+    if value:
+        return str(value)
+    return str(get_yaml_schema_delta(project.script_type or "short_drama")["metadata"]["format"])
+
+
+def clean_episode_title(raw_title: Any, book_title: str, episode_number: int) -> str:
+    title = str(raw_title or "").strip()
+    if not title:
+        return ""
+    title = title.replace("《", "").replace("》", "").strip()
+    if book_title:
+        title = re.sub(re.escape(book_title), "", title, flags=re.IGNORECASE).strip()
+    title = re.sub(r"(?i)\bepisode\s*\d+\b", "", title).strip()
+    title = re.sub(rf"第\s*{episode_number}\s*[集话話回章部]?", "", title).strip()
+    title = re.sub(r"第\s*[一二三四五六七八九十百千万零〇\d]+\s*[集话話回章部]", "", title).strip()
+    title = re.sub(r"^[\s:：\-—_·.,，。]+", "", title).strip()
+    title = re.sub(r"[\s:：\-—_]+$", "", title).strip()
+    return title
+
+
+def fallback_episode_title(
+    payload: dict,
+    events: list[ScriptPlotEvent],
+    book_title: str,
+    episode_number: int,
+) -> str:
+    script = payload.get("script") if isinstance(payload.get("script"), dict) else {}
+    scenes = script.get("scenes") if isinstance(script, dict) else []
+    if isinstance(scenes, list):
+        for scene in scenes:
+            if not isinstance(scene, dict):
+                continue
+            title = clean_episode_title(scene.get("scene_title"), book_title, episode_number)
+            if title:
+                return title
+    if events:
+        content = re.sub(r"\s+", "", events[0].content)
+        return content[:18] or f"剧集{episode_number}"
+    return f"剧集{episode_number}"
+
+
+def normalize_episode_metadata(
+    payload: dict,
+    project: ScriptProject,
+    *,
+    episode_number: int,
+    book_title: str,
+    events: list[ScriptPlotEvent],
+) -> dict:
+    script = payload.setdefault("script", {})
+    if not isinstance(script, dict):
+        script = {}
+        payload["script"] = script
+    raw_metadata = script.get("metadata")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+    title = clean_episode_title(metadata.get("title"), book_title, episode_number)
+    if not title:
+        title = fallback_episode_title(payload, events, book_title, episode_number)
+    script["metadata"] = {
+        "format": get_episode_format(project),
+        "title": title,
+        "episode_number": episode_number,
+        "source_book_title": book_title,
+        "adaptation_type": project.script_type,
+        "episode_duration": project.default_target_duration,
+        "pacing": project.pacing,
+        "scene_frequency": project.scene_frequency,
+        "dialogue_density": project.dialogue_density,
+    }
+    return payload
 
 
 def normalize_episode_source_events(payload: dict, events: list[ScriptPlotEvent]) -> dict:
@@ -1074,10 +1147,12 @@ def build_episode_text(payload: dict) -> str:
     lines = [f"《{title}》"]
     if metadata.get("source_book_title"):
         lines.append(f"来源小说：{metadata.get('source_book_title')}")
-    if metadata.get("episode_index"):
-        lines.append(f"集数：第 {metadata.get('episode_index')} 集")
-    if metadata.get("target_duration"):
-        lines.append(f"目标时长：{metadata.get('target_duration')} 分钟")
+    episode_number = metadata.get("episode_number") or metadata.get("episode_index")
+    if episode_number:
+        lines.append(f"集数：第 {episode_number} 集")
+    episode_duration = metadata.get("episode_duration") or metadata.get("target_duration")
+    if episode_duration:
+        lines.append(f"目标时长：{episode_duration} 分钟")
     for index, scene in enumerate(scenes, start=1):
         if isinstance(scene, dict):
             scene_id = scene.get("scene_id") or index
@@ -1160,7 +1235,7 @@ def generate_one_episode(
         db.commit()
         raise ValueError("已请求停止生成")
 
-    variables = build_episode_variables(db, project, book_title, events)
+    variables = build_episode_variables(db, project, book_title, events, next_index)
     source_text = build_source_guard_text(
         book_title,
         events,
@@ -1185,13 +1260,21 @@ def generate_one_episode(
     ):
         parsed = None
     script_payload = parsed or fallback_episode_payload(project, next_index, events, book_title)
+    script_payload = normalize_episode_metadata(
+        script_payload,
+        project,
+        episode_number=next_index,
+        book_title=book_title,
+        events=events,
+    )
     script_payload = normalize_episode_source_events(script_payload, events)
     yaml_content = dump_episode_yaml(script_payload)
     plain_text = build_episode_text(script_payload)
+    metadata = script_payload["script"]["metadata"]
     episode = ScriptEpisode(
         project_id=project.id,
         episode_index=next_index,
-        title=f"第 {next_index} 集",
+        title=str(metadata.get("title") or f"第 {next_index} 集"),
         event_ids=[event.id for event in events],
         yaml_content=yaml_content,
         plain_text_content=plain_text,
@@ -1282,20 +1365,41 @@ def get_episodes(db: Session, project_id: int) -> list[ScriptEpisodeDetail] | No
 def update_episode(
     db: Session, episode_id: int, payload: ScriptEpisodeUpdate
 ) -> ScriptEpisodeDetail | None:
-    episode = db.scalar(
-        select(ScriptEpisode).where(
-            ScriptEpisode.id == episode_id, ScriptEpisode.is_deleted.is_(False)
-        )
+    row = db.execute(
+        select(ScriptEpisode, ScriptProject, Book.title)
+        .join(ScriptProject, ScriptProject.id == ScriptEpisode.project_id)
+        .join(Book, Book.id == ScriptProject.book_id)
+        .where(ScriptEpisode.id == episode_id, ScriptEpisode.is_deleted.is_(False))
     )
-    if episode is None:
+    row = row.first()
+    if row is None:
         return None
+    episode, project, book_title = row
     data = payload.model_dump(exclude_unset=True)
     if "title" in data and data["title"] is not None:
         episode.title = data["title"].strip()
     if "yaml_payload" in data and data["yaml_payload"] is not None:
-        episode.yaml_content = dump_episode_yaml(data["yaml_payload"])
+        normalized_payload = normalize_episode_metadata(
+            data["yaml_payload"],
+            project,
+            episode_number=episode.episode_index,
+            book_title=book_title,
+            events=[],
+        )
+        episode.yaml_content = dump_episode_yaml(normalized_payload)
     if "yaml_content" in data:
-        episode.yaml_content = data["yaml_content"]
+        parsed = parse_episode_yaml_content(data["yaml_content"])
+        if parsed is not None:
+            parsed = normalize_episode_metadata(
+                parsed,
+                project,
+                episode_number=episode.episode_index,
+                book_title=book_title,
+                events=[],
+            )
+            episode.yaml_content = dump_episode_yaml(parsed)
+        else:
+            episode.yaml_content = data["yaml_content"]
     episode.plain_text_content = build_episode_text_from_yaml(episode.yaml_content)
     episode.status = "draft"
     db.commit()

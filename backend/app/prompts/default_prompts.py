@@ -43,6 +43,7 @@ DEFAULT_PROMPT_TEMPLATES = [
         "user_prompt_template": (
             "小说名称：{book_title}\n"
             "改编参数：{adaptation_config}\n"
+            "本集集数：{episode_number}\n"
             "本集使用的剧情事件：{events}\n"
             "人物档案：{characters}\n"
             "对应原文章节：{chapters}\n"
@@ -51,16 +52,19 @@ DEFAULT_PROMPT_TEMPLATES = [
             "1. 生成且只生成一集剧本，必须使用中文。\n"
             "2. 只能使用本集剧情事件、人物档案和对应原文章节中的信息。\n"
             "3. 不得写哈利波特、霍格沃茨、魔法学院等原文未出现的设定；也不得改写成其他作品。\n"
-            "4. metadata 中必须包含 source_book_title，值必须等于小说名称。\n"
-            "5. scenes 中每个场景包含 scene_id、scene_title、source_events、location、time、characters、action、dialogue、transition。\n"
-            "6. source_events 必须填写剧情事件拆分模块中的全剧本事件序号 event_index，不要按本集重新从 1 编号。\n"
-            "7. dialogue 数组每项包含 speaker、line。\n"
-            "8. 按改编类型、单集时长、剧情节奏、场景切换频率、对话密度控制输出。"
+            "4. metadata 必须固定包含且只按以下含义填写：format、title、episode_number、source_book_title、adaptation_type、episode_duration、pacing、scene_frequency、dialogue_density。\n"
+            "5. episode_number 必须等于“本集集数”，source_book_title 必须等于小说名称，其他参数必须来自改编参数。\n"
+            "6. title 是本集中文标题，只写剧情主题，例如“启程·诺丁城”或“废武魂与先天满魂力”；不要包含小说名、剧名、“第几集”、Episode 等集数前缀。\n"
+            "7. scenes 中每个场景包含 scene_id、scene_title、source_events、location、time、characters、action、dialogue、transition。\n"
+            "8. source_events 必须填写剧情事件拆分模块中的全剧本事件序号 event_index，不要按本集重新从 1 编号。\n"
+            "9. dialogue 数组每项包含 speaker、line。\n"
+            "10. 按改编类型、单集时长、剧情节奏、场景切换频率、对话密度控制输出。"
         ),
         "output_format": "yaml",
         "variables": [
             "book_title",
             "adaptation_config",
+            "episode_number",
             "events",
             "characters",
             "chapters",
