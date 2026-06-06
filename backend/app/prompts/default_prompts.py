@@ -10,18 +10,26 @@ DEFAULT_PROMPT_TEMPLATES = [
         "user_prompt_template": (
             "小说名称：{book_title}\n"
             "改编参数：{adaptation_config}\n"
+            "已有结构化人物事实：{existing_characters}\n"
             "本批章节：{chapters}\n"
             "输出契约：{output_contract}\n\n"
             "任务：\n"
             "1. 将本批章节拆成若干剧情事件，剧情事件必须简洁、准确，使用中文。\n"
-            "2. 识别或补充主要人物档案，人物必须来自本批章节。\n"
-            "3. 不得写哈利波特、霍格沃茨、魔法学院等原文未出现的设定；也不得改写成其他作品。\n\n"
+            "2. 识别每个剧情事件涉及的人物，并对照已有结构化人物事实。\n"
+            "3. characters 只输出本批章节带来的新增事实或状态变化，禁止输出完整人物介绍，禁止重复已有事实。\n"
+            "4. 不得写哈利波特、霍格沃茨、魔法学院等原文未出现的设定；也不得改写成其他作品。\n\n"
             "返回 JSON 字段：\n"
             "- events：按剧情顺序排列的数组，每项包含 content、source_chapter_start、source_chapter_end。\n"
-            "- characters：按重要程度排列的数组，每项包含 name、profile。"
+            "- characters：数组，每项包含 name、facts；facts 每项包含 fact_type、content。"
         ),
         "output_format": "json",
-        "variables": ["book_title", "adaptation_config", "chapters", "output_contract"],
+        "variables": [
+            "book_title",
+            "adaptation_config",
+            "existing_characters",
+            "chapters",
+            "output_contract",
+        ],
         "enabled": True,
     },
     {

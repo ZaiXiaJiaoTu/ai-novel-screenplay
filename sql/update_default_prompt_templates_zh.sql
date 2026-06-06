@@ -5,19 +5,21 @@ SET
     system_prompt = '你是中文小说改编剧本的剧情整理助手。必须只依据用户提供的小说章节内容输出，禁止引入原文没有出现的人物、地点、世界观、作品设定或外部 IP。只返回合法 JSON，不要返回 Markdown 代码块或解释文字。',
     user_prompt_template = '小说名称：{book_title}
 改编参数：{adaptation_config}
+已有结构化人物事实：{existing_characters}
 本批章节：{chapters}
 输出契约：{output_contract}
 
 任务：
 1. 将本批章节拆成若干剧情事件，剧情事件必须简洁、准确，使用中文。
-2. 识别或补充主要人物档案，人物必须来自本批章节。
-3. 不得写哈利波特、霍格沃茨、魔法学院等原文未出现的设定；也不得改写成其他作品。
+2. 识别每个剧情事件涉及的人物，并对照已有结构化人物事实。
+3. characters 只输出本批章节带来的新增事实或状态变化，禁止输出完整人物介绍，禁止重复已有事实。
+4. 不得写哈利波特、霍格沃茨、魔法学院等原文未出现的设定；也不得改写成其他作品。
 
 返回 JSON 字段：
 - events：按剧情顺序排列的数组，每项包含 content、source_chapter_start、source_chapter_end。
-- characters：按重要程度排列的数组，每项包含 name、profile。',
+- characters：数组，每项包含 name、facts；facts 每项包含 fact_type、content。',
     output_format = 'json',
-    variables = '["book_title", "adaptation_config", "chapters", "output_contract"]'::jsonb,
+    variables = '["book_title", "adaptation_config", "existing_characters", "chapters", "output_contract"]'::jsonb,
     version = version + 1,
     updated_at = NOW()
 WHERE task_type = 'plot_event_split_generation'

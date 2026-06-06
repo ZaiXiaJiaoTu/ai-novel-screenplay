@@ -34,3 +34,5 @@ def test_default_plot_event_prompt_is_chinese():
     )
 
     assert "中文小说改编剧本" in plot_prompt["system_prompt"]
+    assert "existing_characters" in plot_prompt["variables"]
+    assert "禁止输出完整人物介绍" in plot_prompt["user_prompt_template"]

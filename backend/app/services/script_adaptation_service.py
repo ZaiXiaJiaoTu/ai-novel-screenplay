@@ -1,4 +1,6 @@
 import json
+import re
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -7,10 +9,12 @@ import yaml
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.database import SessionLocal
 from app.models.book import Book
 from app.models.chapter import Chapter
 from app.models.export_record import ExportRecord
 from app.models.script_adaptation import (
+    ScriptCharacterFact,
     ScriptCharacterProfile,
     ScriptEpisode,
     ScriptEventBatch,
@@ -149,10 +153,14 @@ def serialize_event(event: ScriptPlotEvent) -> ScriptPlotEventDetail:
 
 
 def serialize_character(character: ScriptCharacterProfile) -> ScriptCharacterDetail:
+    facts = getattr(character, "active_facts", None)
+    profile = character.profile
+    if facts:
+        profile = "\n".join(f"{index}. {fact.content}" for index, fact in enumerate(facts, start=1))
     return ScriptCharacterDetail(
         character_id=character.id,
         name=character.name,
-        profile=character.profile,
+        profile=profile,
         metadata_json=character.metadata_json,
     )
 
@@ -315,7 +323,7 @@ def delete_adaptation_project(db: Session, project_id: int) -> bool | None:
         return None
     project.is_deleted = True
     project.deleted_at = datetime.utcnow()
-    for model in (ScriptPlotEvent, ScriptCharacterProfile, ScriptEpisode):
+    for model in (ScriptPlotEvent, ScriptCharacterFact, ScriptCharacterProfile, ScriptEpisode):
         for item in db.scalars(
             select(model).where(model.project_id == project_id, model.is_deleted.is_(False))
         ):
@@ -340,10 +348,45 @@ def get_next_split_chapters(
     return done_batches + 1, chapters[start : start + CHAPTERS_PER_BATCH]
 
 
-def build_split_variables(project: ScriptProject, book_title: str, chapters: list[Chapter]) -> dict:
+def build_character_context(db: Session, project_id: int) -> list[dict]:
+    characters = db.scalars(
+        select(ScriptCharacterProfile)
+        .where(
+            ScriptCharacterProfile.project_id == project_id,
+            ScriptCharacterProfile.is_deleted.is_(False),
+        )
+        .order_by(ScriptCharacterProfile.name)
+    ).all()
+    result: list[dict] = []
+    for character in characters:
+        facts = db.scalars(
+            select(ScriptCharacterFact)
+            .where(
+                ScriptCharacterFact.character_id == character.id,
+                ScriptCharacterFact.is_deleted.is_(False),
+                ScriptCharacterFact.status == "active",
+            )
+            .order_by(ScriptCharacterFact.id)
+        ).all()
+        result.append(
+            {
+                "name": character.name,
+                "facts": [
+                    {"fact_type": fact.fact_type, "content": fact.content}
+                    for fact in facts
+                ],
+            }
+        )
+    return result
+
+
+def build_split_variables(
+    project: ScriptProject, book_title: str, chapters: list[Chapter], db: Session | None = None
+) -> dict:
     return {
         "book_title": book_title,
         "adaptation_config": build_adaptation_config(project),
+        "existing_characters": build_character_context(db, project.id) if db is not None else [],
         "chapters": [
             {
                 "chapter_index": chapter.chapter_index,
@@ -354,7 +397,17 @@ def build_split_variables(project: ScriptProject, book_title: str, chapters: lis
         ],
         "output_contract": {
             "events": ["简洁且准确的一段剧情事件"],
-            "characters": [{"name": "人物名", "profile": "人物特征与设定补充"}],
+            "characters": [
+                {
+                    "name": "人物名",
+                    "facts": [
+                        {
+                            "fact_type": "身份/关系/能力/状态/态度/目标/其他",
+                            "content": "只写本批章节带来的新增或变化事实，不写完整人物介绍",
+                        }
+                    ],
+                }
+            ],
         },
     }
 
@@ -384,7 +437,47 @@ def normalize_split_payload(payload: dict | None, chapters: list[Chapter]) -> di
     return {"events": events, "characters": characters}
 
 
-def merge_characters(db: Session, project_id: int, characters: list[dict]) -> None:
+def normalize_fact_content(value: str) -> str:
+    return re.sub(r"[\s，,。；;：:、]+", "", value.strip().lower())[:500]
+
+
+def extract_character_facts(item: dict) -> list[dict]:
+    facts = item.get("facts")
+    if isinstance(facts, list):
+        result = []
+        for fact in facts:
+            if isinstance(fact, str):
+                result.append({"fact_type": "设定", "content": fact.strip()})
+            elif isinstance(fact, dict):
+                result.append(
+                    {
+                        "fact_type": str(fact.get("fact_type") or fact.get("type") or "设定"),
+                        "content": str(fact.get("content") or fact.get("fact") or "").strip(),
+                    }
+                )
+        return result
+    profile = str(item.get("profile") or item.get("description") or "").strip()
+    return [{"fact_type": "设定", "content": profile}] if profile else []
+
+
+def rebuild_character_profile(db: Session, character: ScriptCharacterProfile) -> None:
+    facts = db.scalars(
+        select(ScriptCharacterFact)
+        .where(
+            ScriptCharacterFact.character_id == character.id,
+            ScriptCharacterFact.is_deleted.is_(False),
+            ScriptCharacterFact.status == "active",
+        )
+        .order_by(ScriptCharacterFact.id)
+    ).all()
+    character.profile = "\n".join(
+        f"{index}. {fact.content}" for index, fact in enumerate(facts, start=1)
+    )
+
+
+def merge_characters(
+    db: Session, project_id: int, characters: list[dict], batch_id: int | None = None
+) -> None:
     existing = {
         character.name: character
         for character in db.scalars(
@@ -398,25 +491,53 @@ def merge_characters(db: Session, project_id: int, characters: list[dict]) -> No
         if not isinstance(item, dict):
             continue
         name = str(item.get("name") or "").strip()
-        profile = str(item.get("profile") or item.get("description") or "").strip()
         if not name:
             continue
         if name in existing:
-            if profile and profile not in existing[name].profile:
-                existing[name].profile = f"{existing[name].profile}\n{profile}".strip()
-            existing[name].metadata_json = item
+            character = existing[name]
+            character.metadata_json = item
         else:
-            db.add(
-                ScriptCharacterProfile(
-                    project_id=project_id,
-                    name=name,
-                    profile=profile,
-                    metadata_json=item,
+            character = ScriptCharacterProfile(
+                project_id=project_id,
+                name=name,
+                profile="",
+                metadata_json=item,
+            )
+            db.add(character)
+            db.flush()
+            existing[name] = character
+        existing_facts = {
+            fact.normalized_content
+            for fact in db.scalars(
+                select(ScriptCharacterFact).where(
+                    ScriptCharacterFact.character_id == character.id,
+                    ScriptCharacterFact.is_deleted.is_(False),
                 )
             )
+        }
+        for fact in extract_character_facts(item):
+            content = fact["content"].strip()
+            normalized = normalize_fact_content(content)
+            if not content or not normalized or normalized in existing_facts:
+                continue
+            db.add(
+                ScriptCharacterFact(
+                    project_id=project_id,
+                    character_id=character.id,
+                    batch_id=batch_id,
+                    fact_type=fact["fact_type"][:100],
+                    content=content,
+                    normalized_content=normalized,
+                    status="active",
+                )
+            )
+            existing_facts.add(normalized)
+        rebuild_character_profile(db, character)
 
 
-def split_one_batch(db: Session, project_id: int) -> ScriptWorkflowProgress | None:
+def split_one_batch(
+    db: Session, project_id: int, *, clear_stop_on_finish: bool = True
+) -> ScriptWorkflowProgress | None:
     row = get_project_with_book(db, project_id)
     if row is None:
         return None
@@ -431,7 +552,14 @@ def split_one_batch(db: Session, project_id: int) -> ScriptWorkflowProgress | No
     project.split_status = "running"
     db.commit()
 
-    variables = build_split_variables(project, book_title, chapters)
+    if project.split_stop_requested:
+        project.split_status = "stopped"
+        if clear_stop_on_finish:
+            project.split_stop_requested = False
+        db.commit()
+        return get_progress(db, project_id)
+
+    variables = build_split_variables(project, book_title, chapters, db)
     parsed_payload = None
     try:
         response_text = call_llm_for_task(
@@ -442,6 +570,7 @@ def split_one_batch(db: Session, project_id: int) -> ScriptWorkflowProgress | No
         parsed_payload = parse_json_payload(response_text)
     except LlmServiceError:
         parsed_payload = None
+    db.refresh(project)
     payload = normalize_split_payload(parsed_payload, chapters)
 
     batch = ScriptEventBatch(
@@ -480,29 +609,46 @@ def split_one_batch(db: Session, project_id: int) -> ScriptWorkflowProgress | No
                     source_chapter_end=end_chapter,
                 )
             )
-    merge_characters(db, project.id, payload["characters"])
+    merge_characters(db, project.id, payload["characters"], batch.id)
     project.split_status = "stopped" if project.split_stop_requested else "idle"
-    project.split_stop_requested = False if project.split_stop_requested else project.split_stop_requested
+    if project.split_stop_requested and clear_stop_on_finish:
+        project.split_stop_requested = False
     db.commit()
     return get_progress(db, project_id)
 
 
-def split_all_batches(db: Session, project_id: int) -> ScriptWorkflowProgress | None:
+def run_split_all_batches(project_id: int) -> None:
+    db = SessionLocal()
+    try:
+        row = get_project_with_book(db, project_id)
+        if row is None:
+            return
+        project, _book_title = row
+        while True:
+            db.refresh(project)
+            if project.split_stop_requested:
+                project.split_status = "stopped"
+                project.split_stop_requested = False
+                db.commit()
+                break
+            if get_next_split_chapters(db, project) is None:
+                project.split_status = "completed"
+                db.commit()
+                break
+            split_one_batch(db, project_id, clear_stop_on_finish=False)
+    finally:
+        db.close()
+
+
+def start_split_all_batches(db: Session, project_id: int) -> ScriptWorkflowProgress | None:
     row = get_project_with_book(db, project_id)
     if row is None:
         return None
     project, _book_title = row
     project.split_stop_requested = False
+    project.split_status = "running"
     db.commit()
-    while True:
-        progress = split_one_batch(db, project_id)
-        db.refresh(project)
-        if progress is None or project.split_stop_requested:
-            break
-        if get_next_split_chapters(db, project) is None:
-            project.split_status = "completed"
-            db.commit()
-            break
+    threading.Thread(target=run_split_all_batches, args=(project_id,), daemon=True).start()
     return get_progress(db, project_id)
 
 
@@ -599,6 +745,16 @@ def get_characters(db: Session, project_id: int) -> list[ScriptCharacterDetail] 
         )
         .order_by(ScriptCharacterProfile.name)
     ).all()
+    for character in characters:
+        character.active_facts = db.scalars(
+            select(ScriptCharacterFact)
+            .where(
+                ScriptCharacterFact.character_id == character.id,
+                ScriptCharacterFact.is_deleted.is_(False),
+                ScriptCharacterFact.status == "active",
+            )
+            .order_by(ScriptCharacterFact.id)
+        ).all()
     return [serialize_character(character) for character in characters]
 
 
@@ -770,7 +926,7 @@ def fallback_episode_payload(
                 {
                     "scene_id": index,
                     "scene_title": f"剧情事件 {event.event_index}",
-                    "source_events": [event.id],
+                    "source_events": [index],
                     "location": "",
                     "time": "",
                     "characters": [],
@@ -782,6 +938,37 @@ def fallback_episode_payload(
             ],
         }
     }
+
+
+def normalize_episode_source_events(payload: dict, events: list[ScriptPlotEvent]) -> dict:
+    id_to_local = {event.id: index for index, event in enumerate(events, start=1)}
+    global_index_to_local = {event.event_index: index for index, event in enumerate(events, start=1)}
+    valid_local = set(range(1, len(events) + 1))
+    script = payload.get("script")
+    if not isinstance(script, dict):
+        return payload
+    scenes = script.get("scenes")
+    if not isinstance(scenes, list):
+        return payload
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            continue
+        raw_values = scene.get("source_events")
+        if not isinstance(raw_values, list):
+            raw_values = []
+        normalized: list[int] = []
+        for value in raw_values:
+            try:
+                number = int(value)
+            except (TypeError, ValueError):
+                continue
+            local = id_to_local.get(number) or global_index_to_local.get(number)
+            if local is None and number in valid_local:
+                local = number
+            if local is not None and local not in normalized:
+                normalized.append(local)
+        scene["source_events"] = normalized
+    return payload
 
 
 def build_episode_text(payload: dict) -> str:
@@ -808,7 +995,11 @@ def build_episode_text_from_yaml(yaml_content: str | None) -> str:
 
 
 def generate_one_episode(
-    db: Session, project_id: int, payload: ScriptEpisodeGeneratePayload | None = None
+    db: Session,
+    project_id: int,
+    payload: ScriptEpisodeGeneratePayload | None = None,
+    *,
+    clear_stop_on_finish: bool = True,
 ) -> ScriptEpisodeDetail | None:
     row = get_project_with_book(db, project_id)
     if row is None:
@@ -830,6 +1021,13 @@ def generate_one_episode(
     project.generation_status = "running"
     db.commit()
 
+    if project.generation_stop_requested:
+        project.generation_status = "stopped"
+        if clear_stop_on_finish:
+            project.generation_stop_requested = False
+        db.commit()
+        raise ValueError("已请求停止生成")
+
     variables = build_episode_variables(db, project, book_title, events)
     source_text = build_source_guard_text(
         book_title,
@@ -847,6 +1045,7 @@ def generate_one_episode(
         parsed = parse_yaml_payload(response_text)
     except LlmServiceError:
         parsed = None
+    db.refresh(project)
     if parsed and not episode_payload_matches_source(
         parsed,
         book_title=book_title,
@@ -854,6 +1053,7 @@ def generate_one_episode(
     ):
         parsed = None
     script_payload = parsed or fallback_episode_payload(project, next_index, events, book_title)
+    script_payload = normalize_episode_source_events(script_payload, events)
     yaml_content = dump_episode_yaml(script_payload)
     plain_text = build_episode_text(script_payload)
     episode = ScriptEpisode(
@@ -871,38 +1071,59 @@ def generate_one_episode(
     project.generation_status = (
         "stopped" if project.generation_stop_requested else "idle"
     )
-    project.generation_stop_requested = False if project.generation_stop_requested else project.generation_stop_requested
+    if project.generation_stop_requested and clear_stop_on_finish:
+        project.generation_stop_requested = False
     db.commit()
     db.refresh(episode)
     return serialize_episode(episode)
 
 
-def generate_all_episodes(
+def run_generate_all_episodes(
+    project_id: int, payload: ScriptEpisodeGeneratePayload | None = None
+) -> None:
+    db = SessionLocal()
+    try:
+        row = get_project_with_book(db, project_id)
+        if row is None:
+            return
+        project, _ = row
+        while True:
+            db.refresh(project)
+            if project.generation_stop_requested:
+                project.generation_status = "stopped"
+                project.generation_stop_requested = False
+                db.commit()
+                break
+            events_per_episode = (
+                payload.events_per_episode
+                if payload and payload.events_per_episode
+                else project.events_per_episode
+            )
+            if len(get_available_events(db, project.id, events_per_episode)) < events_per_episode:
+                project.generation_status = "completed"
+                db.commit()
+                break
+            generate_one_episode(db, project_id, payload, clear_stop_on_finish=False)
+    finally:
+        db.close()
+
+
+def start_generate_all_episodes(
     db: Session, project_id: int, payload: ScriptEpisodeGeneratePayload | None = None
-) -> list[ScriptEpisodeDetail] | None:
+) -> ScriptWorkflowProgress | None:
     row = get_project_with_book(db, project_id)
     if row is None:
         return None
     project, _ = row
     project.generation_stop_requested = False
+    project.generation_status = "running"
     db.commit()
-    episodes: list[ScriptEpisodeDetail] = []
-    while True:
-        events_per_episode = payload.events_per_episode if payload and payload.events_per_episode else project.events_per_episode
-        if len(get_available_events(db, project.id, events_per_episode)) < events_per_episode:
-            project.generation_status = "completed"
-            db.commit()
-            break
-        episode = generate_one_episode(db, project_id, payload)
-        if episode is not None:
-            episodes.append(episode)
-        db.refresh(project)
-        if project.generation_stop_requested:
-            project.generation_status = "stopped"
-            project.generation_stop_requested = False
-            db.commit()
-            break
-    return episodes
+    threading.Thread(
+        target=run_generate_all_episodes,
+        args=(project_id, payload),
+        daemon=True,
+    ).start()
+    return get_progress(db, project_id)
 
 
 def stop_episode_generation(db: Session, project_id: int) -> ScriptWorkflowProgress | None:

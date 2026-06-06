@@ -5,6 +5,8 @@ from app.services.script_adaptation_service import (
     build_episode_text_from_yaml,
     episode_payload_matches_source,
     get_yaml_schema_delta,
+    normalize_episode_source_events,
+    normalize_fact_content,
     parse_json_payload,
     parse_yaml_payload,
 )
@@ -88,3 +90,31 @@ def test_episode_payload_rejects_off_topic_external_ip():
         book_title="斗罗大陆",
         source_text="斗罗大陆 唐三 武魂 蓝银草",
     ) is False
+
+
+def test_episode_source_events_are_episode_local_numbers():
+    events = [
+        SimpleNamespace(id=101, event_index=17),
+        SimpleNamespace(id=102, event_index=18),
+    ]
+    payload = {
+        "script": {
+            "scenes": [
+                {"source_events": [17]},
+                {"source_events": [102]},
+                {"source_events": [2]},
+            ]
+        }
+    }
+
+    result = normalize_episode_source_events(payload, events)
+
+    assert result["script"]["scenes"][0]["source_events"] == [1]
+    assert result["script"]["scenes"][1]["source_events"] == [2]
+    assert result["script"]["scenes"][2]["source_events"] == [2]
+
+
+def test_fact_normalization_removes_punctuation_for_deduping():
+    assert normalize_fact_content("唐三之母，十万年蓝银皇。") == normalize_fact_content(
+        "唐三之母 十万年蓝银皇"
+    )
