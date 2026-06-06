@@ -130,8 +130,6 @@ import {
 } from "@/api/client";
 
 const taskOptions = [
-  "story_profile_generation",
-  "chapter_summary_generation",
   "style_strategy_generation",
   "scene_plan_generation",
   "script_yaml_generation",

@@ -2,295 +2,228 @@
   <section class="books-page">
     <div class="page-header books-header">
       <div>
-        <h1 class="page-title">待选书架</h1>
-        <p class="page-subtitle">导入小说，查看章节，并生成章节摘要与故事设定档案。</p>
+        <h1 class="page-title">小说书架</h1>
+        <p class="page-subtitle">上传小说后自动切分章节，在右侧维护章节标题和正文。</p>
       </div>
       <el-button :icon="Refresh" :loading="loadingBooks" @click="loadBooks">刷新</el-button>
     </div>
 
-    <div class="book-workspace">
-      <section class="book-import-panel">
-        <el-tabs v-model="activeImportTab">
-          <el-tab-pane label="粘贴文本" name="text">
-            <el-form label-position="top">
-              <el-form-item label="作品名称">
-                <el-input v-model="textForm.title" maxlength="80" show-word-limit />
-              </el-form-item>
-              <el-form-item label="小说正文">
-                <el-input
-                  v-model="textForm.content"
-                  type="textarea"
-                  :rows="10"
-                  placeholder="粘贴包含章节标题的小说正文"
-                />
-              </el-form-item>
-              <el-button
-                type="primary"
-                :icon="Upload"
-                :loading="creatingBook"
-                @click="submitTextBook"
-              >
-                导入文本
-              </el-button>
-            </el-form>
-          </el-tab-pane>
+    <div class="bookshelf-layout">
+      <aside class="bookshelf-sidebar">
+        <div class="bookshelf-sidebar-header">
+          <div>
+            <div class="panel-title">作品列表</div>
+            <p class="page-subtitle">共 {{ books.length }} 部作品</p>
+          </div>
+          <el-button type="primary" :icon="Upload" @click="openUploadDialog">
+            上传作品
+          </el-button>
+        </div>
 
-          <el-tab-pane label="上传文件" name="file">
-            <el-form label-position="top">
-              <el-form-item label="作品名称">
-                <el-input
-                  v-model="fileTitle"
-                  maxlength="80"
-                  placeholder="可选，默认使用文件名"
-                  show-word-limit
-                />
-              </el-form-item>
-              <el-upload
-                drag
-                :auto-upload="false"
-                :limit="1"
-                :on-change="selectFile"
-                :on-remove="clearFile"
-                accept=".txt"
-              >
-                <el-icon class="upload-icon"><UploadFilled /></el-icon>
-                <div>拖拽 txt 文件到这里，或点击选择</div>
-              </el-upload>
-              <el-button
-                class="upload-action"
-                type="primary"
-                :icon="Upload"
-                :disabled="!selectedFile"
-                :loading="creatingBook"
-                @click="submitFileBook"
-              >
-                上传文件
-              </el-button>
-            </el-form>
-          </el-tab-pane>
-        </el-tabs>
-      </section>
+        <el-scrollbar class="book-list-scroll" v-loading="loadingBooks">
+          <button
+            v-for="book in books"
+            :key="book.book_id"
+            class="book-list-item"
+            :class="{ active: selectedBook?.book_id === book.book_id }"
+            type="button"
+            @click="selectBook(book)"
+          >
+            <span class="book-title">{{ book.title }}</span>
+            <span class="book-meta">
+              {{ formatNovelType(book.novel_type) }} / {{ book.chapter_count }} 章 /
+              {{ book.word_count }} 字
+            </span>
+          </button>
+          <el-empty v-if="!loadingBooks && books.length === 0" description="暂无作品" />
+        </el-scrollbar>
+      </aside>
 
-      <section class="book-list-panel">
-        <div class="panel-title">作品列表</div>
+      <main class="chapter-workspace">
+        <div class="chapter-toolbar">
+          <div>
+            <div class="panel-title">
+              {{ selectedBook ? selectedBook.title : "章节切分" }}
+            </div>
+            <p class="page-subtitle">
+              {{
+                selectedBook
+                  ? `${chapters.length} 个章节，可编辑标题与正文`
+                  : "请选择左侧作品查看章节"
+              }}
+            </p>
+          </div>
+          <el-button
+            type="primary"
+            :icon="Plus"
+            :disabled="!selectedBook"
+            @click="openCreateChapterDialog"
+          >
+            增加章节
+          </el-button>
+        </div>
+
         <el-table
-          v-loading="loadingBooks"
-          :data="books"
-          height="360"
-          highlight-current-row
-          @row-click="selectBook"
+          v-loading="loadingChapters"
+          :data="chapters"
+          empty-text="暂无章节"
+          height="calc(100vh - 260px)"
         >
-          <el-table-column prop="title" label="作品" min-width="180" />
-          <el-table-column prop="novel_type" label="篇幅" width="88" />
-          <el-table-column prop="chapter_count" label="章节" width="88" />
-          <el-table-column prop="word_count" label="字数" width="100" />
-          <el-table-column label="设定" width="100">
+          <el-table-column prop="chapter_index" label="序号" width="80" />
+          <el-table-column prop="title" label="章节标题" min-width="260" show-overflow-tooltip />
+          <el-table-column prop="word_count" label="字数" width="110" />
+          <el-table-column label="操作" width="170" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click.stop="openStoryProfile(row)">查看</el-button>
+              <el-button link type="primary" :icon="Edit" @click="openEditChapterDialog(row)">
+                编辑
+              </el-button>
+              <el-button link type="danger" :icon="Delete" @click="removeChapter(row)">
+                删除
+              </el-button>
             </template>
           </el-table-column>
         </el-table>
-      </section>
+      </main>
     </div>
 
-    <section class="chapter-panel">
-      <div class="chapter-toolbar">
-        <div>
-          <div class="panel-title">章节与摘要</div>
-          <p class="page-subtitle">
-            {{ selectedBook ? selectedBook.title : "请选择一部作品" }}
-          </p>
-        </div>
-        <div class="settings-actions">
-          <el-button
-            :icon="Notebook"
-            :disabled="!selectedBook"
-            :loading="loadingProfile"
-            @click="selectedBook && openStoryProfile(selectedBook)"
-          >
-            故事设定
-          </el-button>
-          <el-button
-            type="primary"
-            :icon="DocumentChecked"
-            :disabled="!selectedBook"
-            :loading="generatingSummaries"
-            @click="runChapterSummaryGeneration"
-          >
-            生成章节摘要
-          </el-button>
-        </div>
-      </div>
-
-      <el-table
-        v-loading="loadingChapters"
-        :data="chapters"
-        empty-text="暂无章节"
-        @row-click="loadSummary"
-      >
-        <el-table-column prop="chapter_index" label="序号" width="80" />
-        <el-table-column prop="title" label="章节标题" min-width="220" />
-        <el-table-column prop="word_count" label="字数" width="100" />
-        <el-table-column label="摘要" min-width="260">
-          <template #default="{ row }">
-            <span>{{ summaryMap[row.chapter_id]?.summary || "点击查看摘要" }}</span>
-          </template>
-        </el-table-column>
-      </el-table>
-    </section>
-
-    <el-drawer v-model="profileVisible" title="故事设定档案" size="720px">
-      <section v-if="profileBook" class="profile-drawer">
-        <div class="profile-toolbar">
-          <div>
-            <div class="panel-title">{{ profileBook.title }}</div>
-            <p class="page-subtitle">
-              v{{ profileForm.version || 1 }} / {{ profileForm.confirmed ? "已确认" : "未确认" }}
-            </p>
-          </div>
-          <div class="settings-actions">
-            <el-button :loading="generatingProfile" @click="runStoryProfileGeneration">
-              AI 生成设定
-            </el-button>
-            <el-button type="primary" :loading="savingProfile" @click="saveStoryProfile">
-              保存
-            </el-button>
-          </div>
-        </div>
-
-        <el-form label-position="top">
-          <div class="settings-form-grid">
-            <el-form-item label="标题">
-              <el-input v-model="profileForm.title" />
+    <el-dialog v-model="uploadVisible" title="上传作品" width="680px" destroy-on-close>
+      <el-tabs v-model="activeUploadTab">
+        <el-tab-pane label="文本输入" name="text">
+          <el-form label-position="top">
+            <el-form-item label="作品名称">
+              <el-input v-model="textForm.title" maxlength="80" show-word-limit />
             </el-form-item>
-            <el-form-item label="类型">
-              <el-input v-model="profileForm.genre" />
+            <el-form-item label="小说正文">
+              <el-input
+                v-model="textForm.content"
+                type="textarea"
+                :rows="12"
+                placeholder="粘贴包含章节标题的小说正文"
+              />
             </el-form-item>
-            <el-form-item label="基调">
-              <el-input v-model="profileForm.tone" />
+          </el-form>
+        </el-tab-pane>
+
+        <el-tab-pane label="文件上传" name="file">
+          <el-form label-position="top">
+            <el-form-item label="作品名称">
+              <el-input
+                v-model="fileTitle"
+                maxlength="80"
+                placeholder="可选，默认使用文件名"
+                show-word-limit
+              />
             </el-form-item>
-          </div>
-          <el-form-item label="故事概述">
-            <el-input v-model="profileForm.overview" type="textarea" :rows="4" />
+            <el-upload
+              ref="uploadRef"
+              drag
+              :auto-upload="false"
+              :limit="1"
+              :on-change="selectFile"
+              :on-remove="clearFile"
+              accept=".txt"
+            >
+              <el-icon class="upload-icon"><UploadFilled /></el-icon>
+              <div>拖拽 txt 文件到这里，或点击选择</div>
+            </el-upload>
+          </el-form>
+        </el-tab-pane>
+      </el-tabs>
+      <template #footer>
+        <el-button @click="uploadVisible = false">取消</el-button>
+        <el-button type="primary" :loading="creatingBook" @click="submitBook">
+          上传作品
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="chapterDialogVisible"
+      :title="editingChapter ? '编辑章节' : '新增章节'"
+      width="760px"
+      destroy-on-close
+    >
+      <el-form label-position="top">
+        <div class="chapter-form-grid">
+          <el-form-item label="章节标题">
+            <el-input v-model="chapterForm.title" maxlength="120" show-word-limit />
           </el-form-item>
-          <el-form-item label="世界观设定">
-            <el-input v-model="profileForm.world_setting" type="textarea" :rows="4" />
+          <el-form-item v-if="!editingChapter" label="插入位置">
+            <el-input-number
+              v-model="chapterForm.chapter_index"
+              :min="1"
+              :max="chapters.length + 1"
+            />
           </el-form-item>
-          <el-form-item label="核心冲突">
-            <el-input v-model="profileForm.main_conflict" type="textarea" :rows="3" />
-          </el-form-item>
-          <el-form-item label="人物">
-            <el-input v-model="profileJson.characters" type="textarea" :rows="5" />
-          </el-form-item>
-          <el-form-item label="关键事件">
-            <el-input v-model="profileJson.key_events" type="textarea" :rows="5" />
-          </el-form-item>
-          <el-form-item label="线索">
-            <el-input v-model="profileJson.clues" type="textarea" :rows="4" />
-          </el-form-item>
-          <el-checkbox v-model="profileForm.confirmed">确认该设定档案</el-checkbox>
-        </el-form>
-      </section>
-    </el-drawer>
+        </div>
+        <el-form-item label="章节正文">
+          <el-input v-model="chapterForm.content" type="textarea" :rows="16" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="chapterDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingChapter" @click="saveChapter">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import {
-  DocumentChecked,
-  Notebook,
-  Refresh,
-  Upload,
-  UploadFilled
-} from "@element-plus/icons-vue";
-import { ElMessage, type UploadFile } from "element-plus";
-import { computed, onMounted, reactive, ref } from "vue";
+import { Delete, Edit, Plus, Refresh, Upload, UploadFilled } from "@element-plus/icons-vue";
+import { ElMessage, ElMessageBox, type UploadFile, type UploadInstance } from "element-plus";
+import { onMounted, reactive, ref } from "vue";
 
 import {
   type BookListItem,
+  type ChapterDetail,
   type ChapterListItem,
-  type ChapterSummaryDetail,
-  type StoryProfileDetail,
   createBookFromText,
+  createChapter,
+  deleteChapter,
   fetchBookChapters,
   fetchBooks,
-  fetchChapterSummary,
-  fetchStoryProfile,
-  generateChapterSummaries,
-  generateStoryProfile,
-  updateStoryProfile,
+  fetchChapter,
+  updateChapter,
   uploadBook
 } from "@/api/client";
 
-const activeImportTab = ref("text");
 const books = ref<BookListItem[]>([]);
 const chapters = ref<ChapterListItem[]>([]);
 const selectedBook = ref<BookListItem | null>(null);
-const profileBook = ref<BookListItem | null>(null);
 const selectedFile = ref<File | null>(null);
-const fileTitle = ref("");
+const uploadRef = ref<UploadInstance>();
 const loadingBooks = ref(false);
 const loadingChapters = ref(false);
 const creatingBook = ref(false);
-const generatingSummaries = ref(false);
-const loadingProfile = ref(false);
-const generatingProfile = ref(false);
-const savingProfile = ref(false);
-const profileVisible = ref(false);
-const summaries = ref<ChapterSummaryDetail[]>([]);
+const savingChapter = ref(false);
+const uploadVisible = ref(false);
+const chapterDialogVisible = ref(false);
+const activeUploadTab = ref("text");
+const editingChapter = ref<ChapterDetail | null>(null);
+const fileTitle = ref("");
 const textForm = reactive({
   title: "",
   content: ""
 });
-const profileForm = reactive({
-  profile_id: 0,
-  version: 1,
+const chapterForm = reactive({
   title: "",
-  genre: "",
-  overview: "",
-  world_setting: "",
-  main_conflict: "",
-  tone: "",
-  confirmed: false
-});
-const profileJson = reactive({
-  characters: "[]",
-  key_events: "[]",
-  clues: "[]"
+  content: "",
+  chapter_index: 1
 });
 
-const summaryMap = computed(() =>
-  Object.fromEntries(summaries.value.map((item) => [item.chapter_id, item]))
-);
-
-function stringifyJson(value: unknown) {
-  return JSON.stringify(value ?? [], null, 2);
+function formatNovelType(type: string | null) {
+  const labels: Record<string, string> = {
+    short: "短篇",
+    middle: "中篇",
+    long: "长篇"
+  };
+  return type ? labels[type] || type : "未分类";
 }
 
-function parseJsonArray(value: string, fieldName: string) {
-  try {
-    const parsed = JSON.parse(value || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    throw new Error(`${fieldName} 必须是合法 JSON 数组`);
-  }
-}
-
-function applyProfile(profile: StoryProfileDetail) {
-  Object.assign(profileForm, {
-    profile_id: profile.profile_id,
-    version: profile.version,
-    title: profile.title || "",
-    genre: profile.genre || "",
-    overview: profile.overview || "",
-    world_setting: profile.world_setting || "",
-    main_conflict: profile.main_conflict || "",
-    tone: profile.tone || "",
-    confirmed: profile.confirmed
-  });
-  profileJson.characters = stringifyJson(profile.characters);
-  profileJson.key_events = stringifyJson(profile.key_events);
-  profileJson.clues = stringifyJson(profile.clues);
+function openUploadDialog() {
+  uploadVisible.value = true;
 }
 
 async function loadBooks() {
@@ -298,6 +231,15 @@ async function loadBooks() {
   try {
     const result = await fetchBooks();
     books.value = result.records;
+    if (!selectedBook.value && books.value.length > 0) {
+      await selectBook(books.value[0]);
+    } else if (
+      selectedBook.value &&
+      !books.value.some((book) => book.book_id === selectedBook.value?.book_id)
+    ) {
+      selectedBook.value = null;
+      chapters.value = [];
+    }
   } catch {
     books.value = [];
     ElMessage.error("作品列表加载失败，请检查后端服务和数据库连接");
@@ -306,12 +248,10 @@ async function loadBooks() {
   }
 }
 
-async function selectBook(book: BookListItem) {
-  selectedBook.value = book;
-  summaries.value = [];
+async function loadChapters(bookId: number) {
   loadingChapters.value = true;
   try {
-    chapters.value = await fetchBookChapters(book.book_id);
+    chapters.value = await fetchBookChapters(bookId);
   } catch {
     chapters.value = [];
     ElMessage.error("章节列表加载失败");
@@ -320,30 +260,9 @@ async function selectBook(book: BookListItem) {
   }
 }
 
-async function submitTextBook() {
-  if (!textForm.title.trim() || !textForm.content.trim()) {
-    ElMessage.warning("请填写作品名称和小说正文");
-    return;
-  }
-  creatingBook.value = true;
-  try {
-    const result = await createBookFromText({
-      title: textForm.title.trim(),
-      content: textForm.content
-    });
-    ElMessage.success("导入成功");
-    textForm.title = "";
-    textForm.content = "";
-    await loadBooks();
-    const created = books.value.find((item) => item.book_id === result.book_id);
-    if (created) {
-      await selectBook(created);
-    }
-  } catch {
-    ElMessage.error("文本导入失败");
-  } finally {
-    creatingBook.value = false;
-  }
+async function selectBook(book: BookListItem) {
+  selectedBook.value = book;
+  await loadChapters(book.book_id);
 }
 
 function selectFile(uploadFile: UploadFile) {
@@ -354,109 +273,145 @@ function clearFile() {
   selectedFile.value = null;
 }
 
-async function submitFileBook() {
-  if (!selectedFile.value) {
-    ElMessage.warning("请选择 txt 文件");
-    return;
-  }
+function resetUploadForm() {
+  textForm.title = "";
+  textForm.content = "";
+  fileTitle.value = "";
+  selectedFile.value = null;
+  uploadRef.value?.clearFiles();
+}
+
+async function submitBook() {
   creatingBook.value = true;
   try {
-    const result = await uploadBook(selectedFile.value, fileTitle.value);
+    const result =
+      activeUploadTab.value === "text"
+        ? await submitTextBook()
+        : await submitFileBook();
+    if (!result) {
+      return;
+    }
     ElMessage.success("上传成功");
-    fileTitle.value = "";
-    selectedFile.value = null;
+    uploadVisible.value = false;
+    resetUploadForm();
     await loadBooks();
     const created = books.value.find((item) => item.book_id === result.book_id);
     if (created) {
       await selectBook(created);
     }
-  } catch {
-    ElMessage.error("文件上传失败");
   } finally {
     creatingBook.value = false;
   }
 }
 
-async function runChapterSummaryGeneration() {
+async function submitTextBook() {
+  if (!textForm.title.trim() || !textForm.content.trim()) {
+    ElMessage.warning("请填写作品名称和小说正文");
+    return null;
+  }
+  try {
+    return await createBookFromText({
+      title: textForm.title.trim(),
+      content: textForm.content
+    });
+  } catch {
+    ElMessage.error("文本上传失败");
+    return null;
+  }
+}
+
+async function submitFileBook() {
+  if (!selectedFile.value) {
+    ElMessage.warning("请选择 txt 文件");
+    return null;
+  }
+  try {
+    return await uploadBook(selectedFile.value, fileTitle.value);
+  } catch {
+    ElMessage.error("文件上传失败");
+    return null;
+  }
+}
+
+function openCreateChapterDialog() {
   if (!selectedBook.value) {
     return;
   }
-  generatingSummaries.value = true;
+  editingChapter.value = null;
+  chapterForm.title = "";
+  chapterForm.content = "";
+  chapterForm.chapter_index = chapters.value.length + 1;
+  chapterDialogVisible.value = true;
+}
+
+async function openEditChapterDialog(chapter: ChapterListItem) {
   try {
-    const result = await generateChapterSummaries(selectedBook.value.book_id);
-    summaries.value = result.summaries;
-    ElMessage.success(`已生成 ${result.generated_count} 个章节摘要`);
+    const detail = await fetchChapter(chapter.chapter_id);
+    editingChapter.value = detail;
+    chapterForm.title = detail.title;
+    chapterForm.content = detail.content;
+    chapterForm.chapter_index = detail.chapter_index;
+    chapterDialogVisible.value = true;
   } catch {
-    ElMessage.error("章节摘要生成失败");
-  } finally {
-    generatingSummaries.value = false;
+    ElMessage.error("章节内容加载失败");
   }
 }
 
-async function loadSummary(chapter: ChapterListItem) {
-  try {
-    const summary = await fetchChapterSummary(chapter.chapter_id);
-    summaries.value = [
-      ...summaries.value.filter((item) => item.chapter_id !== chapter.chapter_id),
-      summary
-    ];
-  } catch {
-    ElMessage.info("该章节还没有摘要");
-  }
-}
-
-async function openStoryProfile(book: BookListItem) {
-  profileBook.value = book;
-  profileVisible.value = true;
-  loadingProfile.value = true;
-  try {
-    applyProfile(await fetchStoryProfile(book.book_id));
-  } catch {
-    ElMessage.error("故事设定加载失败");
-  } finally {
-    loadingProfile.value = false;
-  }
-}
-
-async function runStoryProfileGeneration() {
-  if (!profileBook.value) {
+async function saveChapter() {
+  if (!selectedBook.value) {
     return;
   }
-  generatingProfile.value = true;
+  if (!chapterForm.title.trim() || !chapterForm.content.trim()) {
+    ElMessage.warning("请填写章节标题和正文");
+    return;
+  }
+  savingChapter.value = true;
   try {
-    applyProfile(await generateStoryProfile(profileBook.value.book_id));
-    ElMessage.success("故事设定已生成");
+    if (editingChapter.value) {
+      await updateChapter(editingChapter.value.chapter_id, {
+        title: chapterForm.title.trim(),
+        content: chapterForm.content
+      });
+      ElMessage.success("章节已保存");
+    } else {
+      await createChapter(selectedBook.value.book_id, {
+        title: chapterForm.title.trim(),
+        content: chapterForm.content,
+        chapter_index: chapterForm.chapter_index
+      });
+      ElMessage.success("章节已新增");
+    }
+    chapterDialogVisible.value = false;
+    await loadChapters(selectedBook.value.book_id);
+    await loadBooks();
   } catch {
-    ElMessage.error("故事设定生成失败");
+    ElMessage.error("章节保存失败");
   } finally {
-    generatingProfile.value = false;
+    savingChapter.value = false;
   }
 }
 
-async function saveStoryProfile() {
-  if (!profileBook.value) {
+async function removeChapter(chapter: ChapterListItem) {
+  if (!selectedBook.value) {
     return;
   }
-  savingProfile.value = true;
   try {
-    const payload = {
-      title: profileForm.title,
-      genre: profileForm.genre,
-      overview: profileForm.overview,
-      world_setting: profileForm.world_setting,
-      main_conflict: profileForm.main_conflict,
-      tone: profileForm.tone,
-      confirmed: profileForm.confirmed,
-      characters: parseJsonArray(profileJson.characters, "人物"),
-      key_events: parseJsonArray(profileJson.key_events, "关键事件"),
-      clues: parseJsonArray(profileJson.clues, "线索")
-    };
-    applyProfile(await updateStoryProfile(profileBook.value.book_id, payload));
-    ElMessage.success("故事设定已保存");
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : "故事设定保存失败");
-  } finally {
-    savingProfile.value = false;
+    await ElMessageBox.confirm(`确定删除「${chapter.title}」吗？`, "删除章节", {
+      type: "warning",
+      confirmButtonText: "删除",
+      cancelButtonText: "取消"
+    });
+  } catch {
+    return;
+  }
+
+  try {
+    await deleteChapter(chapter.chapter_id);
+    ElMessage.success("章节已删除");
+    await loadChapters(selectedBook.value.book_id);
+    await loadBooks();
+  } catch {
+    ElMessage.error("章节删除失败");
   }
 }
 

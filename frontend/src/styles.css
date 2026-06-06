@@ -81,6 +81,81 @@ body {
   gap: 18px;
 }
 
+.bookshelf-layout {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 18px;
+  min-height: calc(100vh - 150px);
+}
+
+.bookshelf-sidebar,
+.chapter-workspace {
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 18px;
+}
+
+.bookshelf-sidebar {
+  min-width: 0;
+}
+
+.bookshelf-sidebar-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.book-list-scroll {
+  height: calc(100vh - 250px);
+}
+
+.book-list-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.book-list-item:hover,
+.book-list-item.active {
+  border-color: #409eff;
+  background: #ecf5ff;
+}
+
+.book-title {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.book-meta {
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.chapter-workspace {
+  min-width: 0;
+}
+
+.chapter-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 14px;
+}
+
 .book-import-panel,
 .book-list-panel,
 .chapter-panel {
@@ -267,6 +342,14 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .bookshelf-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .book-list-scroll {
+    height: 320px;
+  }
+
   .books-header,
   .chapter-toolbar,
   .settings-header {
@@ -275,6 +358,10 @@ body {
   }
 
   .settings-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .chapter-form-grid {
     grid-template-columns: 1fr;
   }
 
