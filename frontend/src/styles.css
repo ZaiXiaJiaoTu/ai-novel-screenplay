@@ -302,6 +302,15 @@ body {
   width: 100%;
 }
 
+.batch-table {
+  min-width: 100%;
+}
+
+.batch-table .el-table__header,
+.batch-table .el-table__body {
+  width: 100% !important;
+}
+
 .batch-events-panel {
   width: 100%;
   padding: 8px 12px 12px 42px;

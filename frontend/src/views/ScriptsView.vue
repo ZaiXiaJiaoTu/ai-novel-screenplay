@@ -106,7 +106,7 @@
               </div>
 
               <el-table class="batch-table" :data="batchesWithEvents" empty-text="暂无拆分批次">
-                <el-table-column type="expand">
+                <el-table-column type="expand" width="56">
                   <template #default="{ row }">
                     <div class="batch-events-panel">
                       <el-table class="batch-events-table" :data="row.events" empty-text="本批次暂无剧情事件">
@@ -145,7 +145,8 @@
                   </template>
                 </el-table-column>
                 <el-table-column prop="event_count" label="事件数" width="100" />
-                <el-table-column prop="status" label="状态" width="120" />
+                <el-table-column prop="status" label="状态" min-width="120" />
+                <el-table-column label="" />
               </el-table>
             </section>
           </el-tab-pane>
