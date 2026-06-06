@@ -54,6 +54,25 @@ class ScriptCharacterProfile(SoftDeleteMixin, TimestampMixin, Base):
     metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
+class ScriptCharacterFact(SoftDeleteMixin, TimestampMixin, Base):
+    __tablename__ = "script_character_facts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("script_projects.id"), nullable=False, index=True
+    )
+    character_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("script_character_profiles.id"), nullable=False, index=True
+    )
+    batch_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("script_event_batches.id"), nullable=True, index=True
+    )
+    fact_type: Mapped[str] = mapped_column(String(100), default="设定", nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_content: Mapped[str] = mapped_column(String(500), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="active", nullable=False)
+
+
 class ScriptEpisode(SoftDeleteMixin, TimestampMixin, Base):
     __tablename__ = "script_episodes"
 

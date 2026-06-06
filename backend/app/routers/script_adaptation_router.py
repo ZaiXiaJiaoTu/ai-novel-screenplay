@@ -20,7 +20,6 @@ from app.services.script_adaptation_service import (
     delete_event,
     export_all_episodes,
     export_episode,
-    generate_all_episodes,
     generate_one_episode,
     get_batches,
     get_characters,
@@ -28,7 +27,8 @@ from app.services.script_adaptation_service import (
     get_events,
     get_progress,
     list_adaptation_projects,
-    split_all_batches,
+    start_generate_all_episodes,
+    start_split_all_batches,
     split_one_batch,
     stop_episode_generation,
     stop_split,
@@ -103,7 +103,7 @@ def post_split_once(project_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{project_id}/split/all")
 def post_split_all(project_id: int, db: Session = Depends(get_db)):
-    result = split_all_batches(db, project_id)
+    result = start_split_all_batches(db, project_id)
     if result is None:
         raise HTTPException(status_code=404, detail="script project not found")
     return success(result.model_dump())
@@ -194,10 +194,10 @@ def post_episode_all(
     payload: ScriptEpisodeGeneratePayload | None = None,
     db: Session = Depends(get_db),
 ):
-    result = generate_all_episodes(db, project_id, payload)
+    result = start_generate_all_episodes(db, project_id, payload)
     if result is None:
         raise HTTPException(status_code=404, detail="script project not found")
-    return success([item.model_dump() for item in result])
+    return success(result.model_dump())
 
 
 @router.post("/{project_id}/episodes/stop")

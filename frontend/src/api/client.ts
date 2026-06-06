@@ -463,7 +463,7 @@ export async function splitScriptEventsAll(projectId: number) {
     await apiClient.post<ApiEnvelope<ScriptWorkflowProgress>>(
       `/script-adaptations/${projectId}/split/all`,
       undefined,
-      { timeout: 600000 }
+      { timeout: 30000 }
     )
   );
 }
@@ -547,10 +547,10 @@ export async function generateScriptEpisodesAll(
   payload: { events_per_episode?: number }
 ) {
   return unwrap(
-    await apiClient.post<ApiEnvelope<ScriptEpisodeDetail[]>>(
+    await apiClient.post<ApiEnvelope<ScriptWorkflowProgress>>(
       `/script-adaptations/${projectId}/episodes/all`,
       payload,
-      { timeout: 600000 }
+      { timeout: 30000 }
     )
   );
 }

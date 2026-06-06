@@ -13,6 +13,7 @@ def test_core_tables_are_registered():
         "script_event_batches",
         "script_plot_events",
         "script_character_profiles",
+        "script_character_facts",
         "script_episodes",
         "llm_configs",
         "prompt_templates",

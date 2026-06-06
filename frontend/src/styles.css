@@ -297,6 +297,11 @@ body {
   gap: 16px;
 }
 
+.batch-events-panel {
+  padding: 8px 12px 12px 42px;
+  background: #f8fafc;
+}
+
 .episode-workspace {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);

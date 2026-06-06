@@ -82,8 +82,8 @@
                 </el-button>
                 <el-button
                   :icon="DArrowRight"
-                  :disabled="!selectedProject"
-                  :loading="splitting"
+                  :disabled="!selectedProject || isSplitting"
+                  :loading="isSplitting"
                   @click="splitAll"
                 >
                   全部拆分
@@ -91,7 +91,7 @@
                 <el-button
                   type="warning"
                   :icon="CircleClose"
-                  :disabled="!selectedProject"
+                  :disabled="!selectedProject || !isSplitting"
                   @click="stopSplit"
                 >
                   安全停止拆分
@@ -105,7 +105,39 @@
                 </span>
               </div>
 
-              <el-table :data="batches" empty-text="暂无拆分批次">
+              <el-table :data="batchesWithEvents" empty-text="暂无拆分批次">
+                <el-table-column type="expand">
+                  <template #default="{ row }">
+                    <div class="batch-events-panel">
+                      <el-table :data="row.events" empty-text="本批次暂无剧情事件">
+                        <el-table-column prop="event_index" label="序号" width="80" />
+                        <el-table-column prop="content" label="剧情事件" min-width="360" show-overflow-tooltip />
+                        <el-table-column label="来源章节" width="130">
+                          <template #default="{ row: event }">
+                            {{ event.source_chapter_start }} - {{ event.source_chapter_end }}
+                          </template>
+                        </el-table-column>
+                        <el-table-column label="状态" width="90">
+                          <template #default="{ row: event }">
+                            <el-tag :type="event.locked ? 'warning' : 'success'">
+                              {{ event.locked ? "已锁定" : "可编辑" }}
+                            </el-tag>
+                          </template>
+                        </el-table-column>
+                        <el-table-column label="操作" width="150">
+                          <template #default="{ row: event }">
+                            <el-button link type="primary" :disabled="event.locked" @click="openEventDialog(event)">
+                              编辑
+                            </el-button>
+                            <el-button link type="danger" :disabled="event.locked" @click="removeEvent(event)">
+                              删除
+                            </el-button>
+                          </template>
+                        </el-table-column>
+                      </el-table>
+                    </div>
+                  </template>
+                </el-table-column>
                 <el-table-column prop="batch_index" label="批次" width="90" />
                 <el-table-column label="章节范围" width="160">
                   <template #default="{ row }">
@@ -114,33 +146,6 @@
                 </el-table-column>
                 <el-table-column prop="event_count" label="事件数" width="100" />
                 <el-table-column prop="status" label="状态" width="120" />
-              </el-table>
-
-              <el-table :data="events" empty-text="暂无剧情事件">
-                <el-table-column prop="event_index" label="序号" width="80" />
-                <el-table-column prop="content" label="剧情事件" min-width="360" show-overflow-tooltip />
-                <el-table-column label="来源章节" width="130">
-                  <template #default="{ row }">
-                    {{ row.source_chapter_start }} - {{ row.source_chapter_end }}
-                  </template>
-                </el-table-column>
-                <el-table-column label="状态" width="90">
-                  <template #default="{ row }">
-                    <el-tag :type="row.locked ? 'warning' : 'success'">
-                      {{ row.locked ? "已锁定" : "可编辑" }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column label="操作" width="150">
-                  <template #default="{ row }">
-                    <el-button link type="primary" :disabled="row.locked" @click="openEventDialog(row)">
-                      编辑
-                    </el-button>
-                    <el-button link type="danger" :disabled="row.locked" @click="removeEvent(row)">
-                      删除
-                    </el-button>
-                  </template>
-                </el-table-column>
               </el-table>
             </section>
           </el-tab-pane>
@@ -175,13 +180,13 @@
                     单集生成
                   </el-button>
                   <el-button
-                    :disabled="!selectedProject"
-                    :loading="generatingEpisode"
+                    :disabled="!selectedProject || isGeneratingEpisode"
+                    :loading="isGeneratingEpisode"
                     @click="generateEpisodesAll"
                   >
                     全部生成
                   </el-button>
-                  <el-button type="warning" :disabled="!selectedProject" @click="stopEpisodes">
+                  <el-button type="warning" :disabled="!selectedProject || !isGeneratingEpisode" @click="stopEpisodes">
                     安全停止生成
                   </el-button>
                 </div>
@@ -448,7 +453,7 @@ import {
   Setting
 } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 
 import {
   type AdaptationType,
@@ -511,6 +516,7 @@ const savingCharacter = ref(false);
 const projectDialogVisible = ref(false);
 const eventDialogVisible = ref(false);
 const characterDialogVisible = ref(false);
+let workflowPoller: number | undefined;
 
 const projectForm = reactive({
   book_id: undefined as number | undefined,
@@ -565,6 +571,16 @@ const splitPercent = computed(() => {
   }
   return Math.round((progress.value.split_chapter_count / progress.value.chapter_count) * 100);
 });
+const isSplitting = computed(() => splitting.value || progress.value?.split_status === "running");
+const isGeneratingEpisode = computed(
+  () => generatingEpisode.value || progress.value?.generation_status === "running"
+);
+const batchesWithEvents = computed(() =>
+  batches.value.map((batch) => ({
+    ...batch,
+    events: events.value.filter((event) => event.batch_id === batch.batch_id)
+  }))
+);
 
 function typeLabel(type: string) {
   return (
@@ -631,6 +647,7 @@ async function loadProjectData(projectId: number) {
   episodes.value = nextEpisodes;
   selectedEpisode.value = nextEpisodes[0] ?? null;
   applyEpisodeEdit(selectedEpisode.value);
+  syncWorkflowPolling();
 }
 
 async function openCreateDialog() {
@@ -744,9 +761,10 @@ async function splitAll() {
   try {
     progress.value = await splitScriptEventsAll(selectedProject.value.project_id);
     await reloadSelectedData();
-    ElMessage.success("批量拆分已完成");
+    startWorkflowPolling();
+    ElMessage.success("已开始全部拆分，可随时安全停止");
   } catch {
-    ElMessage.error("批量拆分失败");
+    ElMessage.error("启动全部拆分失败");
   } finally {
     splitting.value = false;
   }
@@ -755,7 +773,9 @@ async function splitAll() {
 async function stopSplit() {
   if (!selectedProject.value) return;
   progress.value = await stopScriptEventSplit(selectedProject.value.project_id);
-  ElMessage.success("已请求安全停止拆分");
+  await reloadSelectedData();
+  startWorkflowPolling();
+  ElMessage.success("已请求安全停止拆分，当前批次完成后不会再调用模型");
 }
 
 async function reloadSelectedData() {
@@ -836,13 +856,14 @@ async function generateEpisodesAll() {
   if (!selectedProject.value) return;
   generatingEpisode.value = true;
   try {
-    await generateScriptEpisodesAll(selectedProject.value.project_id, {
+    progress.value = await generateScriptEpisodesAll(selectedProject.value.project_id, {
       events_per_episode: episodeConfig.events_per_episode
     });
     await reloadSelectedData();
-    ElMessage.success("批量生成已完成");
+    startWorkflowPolling();
+    ElMessage.success("已开始全部生成，可随时安全停止");
   } catch {
-    ElMessage.error("批量生成失败");
+    ElMessage.error("启动全部生成失败");
   } finally {
     generatingEpisode.value = false;
   }
@@ -851,7 +872,44 @@ async function generateEpisodesAll() {
 async function stopEpisodes() {
   if (!selectedProject.value) return;
   progress.value = await stopScriptEpisodeGeneration(selectedProject.value.project_id);
-  ElMessage.success("已请求安全停止生成");
+  await reloadSelectedData();
+  startWorkflowPolling();
+  ElMessage.success("已请求安全停止生成，当前剧集完成后不会再调用模型");
+}
+
+function startWorkflowPolling() {
+  if (workflowPoller !== undefined) {
+    window.clearInterval(workflowPoller);
+  }
+  workflowPoller = window.setInterval(() => {
+    void pollWorkflow();
+  }, 2500);
+}
+
+function stopWorkflowPolling() {
+  if (workflowPoller !== undefined) {
+    window.clearInterval(workflowPoller);
+    workflowPoller = undefined;
+  }
+}
+
+function syncWorkflowPolling() {
+  if (progress.value?.split_status === "running" || progress.value?.generation_status === "running") {
+    startWorkflowPolling();
+  } else {
+    stopWorkflowPolling();
+  }
+}
+
+async function pollWorkflow() {
+  if (!selectedProject.value) {
+    stopWorkflowPolling();
+    return;
+  }
+  await reloadSelectedData();
+  if (progress.value?.split_status !== "running" && progress.value?.generation_status !== "running") {
+    stopWorkflowPolling();
+  }
 }
 
 function selectEpisode(episode: ScriptEpisodeDetail) {
@@ -1048,5 +1106,9 @@ function downloadAllEpisodes() {
 
 onMounted(() => {
   void loadProjects();
+});
+
+onUnmounted(() => {
+  stopWorkflowPolling();
 });
 </script>

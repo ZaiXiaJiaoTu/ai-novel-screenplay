@@ -6,6 +6,7 @@ from app.models.llm_config import LlmConfig
 from app.models.prompt_template import PromptTemplate, PromptTemplateVersion
 from app.models.script_project import ScriptProject
 from app.models.script_adaptation import (
+    ScriptCharacterFact,
     ScriptCharacterProfile,
     ScriptEpisode,
     ScriptEventBatch,
@@ -22,6 +23,7 @@ __all__ = [
     "PromptTemplate",
     "PromptTemplateVersion",
     "ScriptProject",
+    "ScriptCharacterFact",
     "ScriptCharacterProfile",
     "ScriptEpisode",
     "ScriptEventBatch",
