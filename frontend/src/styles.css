@@ -298,8 +298,11 @@ body {
 }
 
 .batch-events-panel {
+  width: calc(100vw - 500px);
+  max-width: 100%;
   padding: 8px 12px 12px 42px;
   background: #f8fafc;
+  overflow-x: auto;
 }
 
 .episode-workspace {

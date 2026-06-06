@@ -72,9 +72,10 @@ script:
 """
     )
 
-    assert "第一集" in text
-    assert "S1. 觉醒" in text
-    assert "唐三: 我会变强。" in text
+    assert "《第一集》" in text
+    assert "场景 S1：觉醒" in text
+    assert "动作：" in text
+    assert "唐三：我会变强。" in text
 
 
 def test_episode_payload_rejects_off_topic_external_ip():

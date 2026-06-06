@@ -113,7 +113,8 @@ import {
 
 const taskOptions = [
   { label: "剧情事件拆分", value: "plot_event_split_generation" },
-  { label: "单集剧本生成", value: "script_episode_generation" }
+  { label: "单集剧本生成", value: "script_episode_generation" },
+  { label: "人物档案整合", value: "character_profile_consolidation" }
 ];
 
 const logs = ref<LlmCallLogListItem[]>([]);
