@@ -7,6 +7,12 @@ from app.models.llm_config import LlmConfig
 from app.models.prompt_template import PromptTemplate, PromptTemplateVersion
 from app.models.script_project import ScriptProject
 from app.models.script_segment import ScriptSegment
+from app.models.script_adaptation import (
+    ScriptCharacterProfile,
+    ScriptEpisode,
+    ScriptEventBatch,
+    ScriptPlotEvent,
+)
 from app.models.user import User
 
 __all__ = [
@@ -21,5 +27,9 @@ __all__ = [
     "PromptTemplateVersion",
     "ScriptProject",
     "ScriptSegment",
+    "ScriptCharacterProfile",
+    "ScriptEpisode",
+    "ScriptEventBatch",
+    "ScriptPlotEvent",
     "User",
 ]
