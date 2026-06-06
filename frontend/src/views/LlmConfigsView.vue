@@ -85,7 +85,12 @@
         </div>
         <el-form-item label="任务范围">
           <el-select v-model="form.task_scope" multiple clearable placeholder="为空表示所有任务">
-            <el-option v-for="task in taskOptions" :key="task" :label="task" :value="task" />
+            <el-option
+              v-for="task in taskOptions"
+              :key="task.value"
+              :label="task.label"
+              :value="task.value"
+            />
           </el-select>
         </el-form-item>
         <div class="settings-switches">
@@ -118,8 +123,8 @@ import {
 } from "@/api/client";
 
 const taskOptions = [
-  "plot_event_split_generation",
-  "script_episode_generation"
+  { label: "剧情事件拆分", value: "plot_event_split_generation" },
+  { label: "单集剧本生成", value: "script_episode_generation" }
 ];
 
 const configs = ref<LlmConfigDetail[]>([]);

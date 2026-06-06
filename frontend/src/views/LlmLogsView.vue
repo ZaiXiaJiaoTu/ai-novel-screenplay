@@ -5,13 +5,21 @@
         <h1 class="page-title">调用日志</h1>
         <p class="page-subtitle">查看大模型调用状态、耗时、Token 用量和错误摘要。</p>
       </div>
-      <el-button :icon="Refresh" :loading="loading" @click="loadLogs">刷新</el-button>
+      <div class="settings-actions">
+        <el-button :icon="Refresh" :loading="loading" @click="loadLogs">刷新</el-button>
+        <el-button type="danger" :loading="clearing" @click="clearLogs">一键清空</el-button>
+      </div>
     </div>
 
     <section class="settings-panel">
       <div class="template-filters">
         <el-select v-model="filters.task_type" clearable placeholder="任务类型" @change="resetAndLoad">
-          <el-option v-for="task in taskOptions" :key="task" :label="task" :value="task" />
+          <el-option
+            v-for="task in taskOptions"
+            :key="task.value"
+            :label="task.label"
+            :value="task.value"
+          />
         </el-select>
         <el-select v-model="filters.status" clearable placeholder="调用状态" @change="resetAndLoad">
           <el-option label="成功" value="success" />
@@ -29,7 +37,9 @@
 
       <el-table v-loading="loading" :data="logs" empty-text="暂无调用日志" @row-click="openLog">
         <el-table-column prop="log_id" label="ID" width="80" />
-        <el-table-column prop="task_type" label="任务类型" min-width="210" show-overflow-tooltip />
+        <el-table-column label="任务类型" min-width="210" show-overflow-tooltip>
+          <template #default="{ row }">{{ taskLabel(row.task_type) }}</template>
+        </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <el-tag :type="row.status === 'success' ? 'success' : 'danger'">
@@ -67,7 +77,7 @@
         <el-descriptions :column="2" border>
           <el-descriptions-item label="日志 ID">{{ selectedLog.log_id }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ selectedLog.status }}</el-descriptions-item>
-          <el-descriptions-item label="任务类型">{{ selectedLog.task_type }}</el-descriptions-item>
+          <el-descriptions-item label="任务类型">{{ taskLabel(selectedLog.task_type) }}</el-descriptions-item>
           <el-descriptions-item label="模型配置">{{ selectedLog.llm_config_id || "-" }}</el-descriptions-item>
           <el-descriptions-item label="提示词模板">{{ selectedLog.prompt_template_id || "-" }}</el-descriptions-item>
         </el-descriptions>
@@ -90,24 +100,26 @@
 
 <script setup lang="ts">
 import { Refresh } from "@element-plus/icons-vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { onMounted, reactive, ref } from "vue";
 
 import {
   type LlmCallLogDetail,
   type LlmCallLogListItem,
+  clearLlmCallLogs,
   fetchLlmCallLog,
   fetchLlmCallLogs
 } from "@/api/client";
 
 const taskOptions = [
-  "plot_event_split_generation",
-  "script_episode_generation"
+  { label: "剧情事件拆分", value: "plot_event_split_generation" },
+  { label: "单集剧本生成", value: "script_episode_generation" }
 ];
 
 const logs = ref<LlmCallLogListItem[]>([]);
 const selectedLog = ref<LlmCallLogDetail | null>(null);
 const loading = ref(false);
+const clearing = ref(false);
 const detailVisible = ref(false);
 const page = ref(1);
 const size = ref(20);
@@ -147,6 +159,26 @@ async function loadLogs() {
 function resetAndLoad() {
   page.value = 1;
   void loadLogs();
+}
+
+function taskLabel(taskType: string) {
+  return taskOptions.find((item) => item.value === taskType)?.label || taskType;
+}
+
+async function clearLogs() {
+  await ElMessageBox.confirm("确定清空全部大模型调用日志吗？该操作不可恢复。", "清空调用日志", {
+    type: "warning"
+  });
+  clearing.value = true;
+  try {
+    const result = await clearLlmCallLogs();
+    selectedLog.value = null;
+    detailVisible.value = false;
+    resetAndLoad();
+    ElMessage.success(`已清空 ${result.deleted_count} 条日志`);
+  } finally {
+    clearing.value = false;
+  }
 }
 
 async function openLog(log: LlmCallLogListItem) {

@@ -46,6 +46,16 @@ TYPE_LABELS = {
 PACING_LABELS = {"fast": "快", "medium": "适中", "slow": "慢"}
 LEVEL_LABELS = {"high": "高", "medium": "中", "low": "低"}
 CHAPTERS_PER_BATCH = 3
+OFF_TOPIC_MARKERS = [
+    "哈利波特",
+    "霍格沃茨",
+    "格兰芬多",
+    "斯莱特林",
+    "Harry Potter",
+    "Hogwarts",
+    "Gryffindor",
+    "Slytherin",
+]
 
 
 def get_yaml_schema_delta(adaptation_type: str) -> dict:
@@ -154,6 +164,7 @@ def serialize_episode(episode: ScriptEpisode) -> ScriptEpisodeDetail:
         title=episode.title,
         event_ids=[int(item) for item in episode.event_ids],
         yaml_content=episode.yaml_content,
+        yaml_payload=parse_episode_yaml_content(episode.yaml_content),
         plain_text_content=episode.plain_text_content,
         status=episode.status,
     )
@@ -691,14 +702,67 @@ def parse_yaml_payload(response_text: str) -> dict | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def parse_episode_yaml_content(yaml_content: str | None) -> dict | None:
+    if not yaml_content:
+        return None
+    return parse_yaml_payload(yaml_content)
+
+
+def dump_episode_yaml(payload: dict) -> str:
+    return yaml.safe_dump(payload, allow_unicode=True, sort_keys=False)
+
+
+def build_source_guard_text(
+    book_title: str,
+    events: list[ScriptPlotEvent],
+    characters: list[ScriptCharacterDetail] | list[dict],
+    chapters: list[Chapter],
+) -> str:
+    parts: list[str] = [book_title]
+    parts.extend(event.content for event in events)
+    for character in characters:
+        if isinstance(character, dict):
+            parts.append(str(character.get("name") or ""))
+            parts.append(str(character.get("profile") or ""))
+        else:
+            parts.append(character.name)
+            parts.append(character.profile)
+    for chapter in chapters:
+        parts.append(chapter.title)
+        parts.append(chapter.content)
+    return "\n".join(part for part in parts if part)
+
+
+def episode_payload_matches_source(
+    payload: dict,
+    *,
+    book_title: str,
+    source_text: str,
+) -> bool:
+    script = payload.get("script") or {}
+    metadata = script.get("metadata") or {}
+    source_book_title = metadata.get("source_book_title")
+    if source_book_title and str(source_book_title).strip() != book_title:
+        return False
+    rendered = dump_episode_yaml(payload)
+    for marker in OFF_TOPIC_MARKERS:
+        if marker in rendered and marker not in source_text:
+            return False
+    return True
+
+
 def fallback_episode_payload(
-    project: ScriptProject, episode_index: int, events: list[ScriptPlotEvent]
+    project: ScriptProject,
+    episode_index: int,
+    events: list[ScriptPlotEvent],
+    book_title: str,
 ) -> dict:
     return {
         "script": {
             "metadata": {
                 "episode_index": episode_index,
                 "title": f"第 {episode_index} 集",
+                "source_book_title": book_title,
                 "script_type": project.script_type,
                 "target_duration": project.default_target_duration,
             },
@@ -736,6 +800,13 @@ def build_episode_text(payload: dict) -> str:
     return "\n".join(line for line in lines if line).strip()
 
 
+def build_episode_text_from_yaml(yaml_content: str | None) -> str:
+    payload = parse_episode_yaml_content(yaml_content)
+    if payload is None:
+        return yaml_content or ""
+    return build_episode_text(payload)
+
+
 def generate_one_episode(
     db: Session, project_id: int, payload: ScriptEpisodeGeneratePayload | None = None
 ) -> ScriptEpisodeDetail | None:
@@ -760,6 +831,12 @@ def generate_one_episode(
     db.commit()
 
     variables = build_episode_variables(db, project, book_title, events)
+    source_text = build_source_guard_text(
+        book_title,
+        events,
+        variables["characters"],
+        get_event_source_chapters(db, project, events),
+    )
     parsed = None
     try:
         response_text = call_llm_for_task(
@@ -770,8 +847,14 @@ def generate_one_episode(
         parsed = parse_yaml_payload(response_text)
     except LlmServiceError:
         parsed = None
-    script_payload = parsed or fallback_episode_payload(project, next_index, events)
-    yaml_content = yaml.safe_dump(script_payload, allow_unicode=True, sort_keys=False)
+    if parsed and not episode_payload_matches_source(
+        parsed,
+        book_title=book_title,
+        source_text=source_text,
+    ):
+        parsed = None
+    script_payload = parsed or fallback_episode_payload(project, next_index, events, book_title)
+    yaml_content = dump_episode_yaml(script_payload)
     plain_text = build_episode_text(script_payload)
     episode = ScriptEpisode(
         project_id=project.id,
@@ -856,10 +939,11 @@ def update_episode(
     data = payload.model_dump(exclude_unset=True)
     if "title" in data and data["title"] is not None:
         episode.title = data["title"].strip()
+    if "yaml_payload" in data and data["yaml_payload"] is not None:
+        episode.yaml_content = dump_episode_yaml(data["yaml_payload"])
     if "yaml_content" in data:
         episode.yaml_content = data["yaml_content"]
-    if "plain_text_content" in data:
-        episode.plain_text_content = data["plain_text_content"]
+    episode.plain_text_content = build_episode_text_from_yaml(episode.yaml_content)
     episode.status = "draft"
     db.commit()
     db.refresh(episode)
@@ -928,7 +1012,11 @@ def export_episode(db: Session, episode_id: int, file_format: str) -> ExportFile
     normalized = file_format.lower()
     if normalized not in {"yaml", "txt"}:
         raise ValueError("only yaml and txt export are supported")
-    content = episode.yaml_content if normalized == "yaml" else episode.plain_text_content
+    content = (
+        episode.yaml_content
+        if normalized == "yaml"
+        else build_episode_text_from_yaml(episode.yaml_content)
+    )
     db.add(
         ExportRecord(
             project_id=episode.project_id,
@@ -961,7 +1049,9 @@ def export_all_episodes(db: Session, project_id: int, file_format: str) -> Expor
     if normalized == "yaml":
         content = "\n---\n".join(episode.yaml_content or "" for episode in episodes)
     else:
-        content = "\n\n".join(episode.plain_text_content or "" for episode in episodes)
+        content = "\n\n".join(
+            build_episode_text_from_yaml(episode.yaml_content) for episode in episodes
+        )
     db.add(
         ExportRecord(
             project_id=project_id,

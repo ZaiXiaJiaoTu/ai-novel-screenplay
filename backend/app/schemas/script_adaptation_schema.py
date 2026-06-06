@@ -94,6 +94,7 @@ class ScriptEpisodeDetail(BaseModel):
     title: str
     event_ids: list[int]
     yaml_content: str | None
+    yaml_payload: dict | None
     plain_text_content: str | None
     status: str
 
@@ -101,6 +102,7 @@ class ScriptEpisodeDetail(BaseModel):
 class ScriptEpisodeUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     yaml_content: str | None = None
+    yaml_payload: dict | None = None
     plain_text_content: str | None = None
 
 

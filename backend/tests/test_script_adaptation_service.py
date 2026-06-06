@@ -2,6 +2,8 @@ from types import SimpleNamespace
 
 from app.services.script_adaptation_service import (
     build_adaptation_config,
+    build_episode_text_from_yaml,
+    episode_payload_matches_source,
     get_yaml_schema_delta,
     parse_json_payload,
     parse_yaml_payload,
@@ -49,3 +51,40 @@ def test_parse_yaml_payload_accepts_code_fence():
     payload = parse_yaml_payload("```yaml\nscript:\n  metadata:\n    title: test\n```")
 
     assert payload["script"]["metadata"]["title"] == "test"
+
+
+def test_episode_text_export_renders_yaml_content():
+    text = build_episode_text_from_yaml(
+        """
+script:
+  metadata:
+    title: 第一集
+  scenes:
+    - scene_id: S1
+      scene_title: 觉醒
+      action:
+        - 唐三走进武魂殿。
+      dialogue:
+        - speaker: 唐三
+          line: 我会变强。
+"""
+    )
+
+    assert "第一集" in text
+    assert "S1. 觉醒" in text
+    assert "唐三: 我会变强。" in text
+
+
+def test_episode_payload_rejects_off_topic_external_ip():
+    payload = {
+        "script": {
+            "metadata": {"source_book_title": "斗罗大陆"},
+            "scenes": [{"action": ["哈利波特走进霍格沃茨。"]}],
+        }
+    }
+
+    assert episode_payload_matches_source(
+        payload,
+        book_title="斗罗大陆",
+        source_text="斗罗大陆 唐三 武魂 蓝银草",
+    ) is False

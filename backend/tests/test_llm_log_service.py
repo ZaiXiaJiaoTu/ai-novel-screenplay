@@ -1,7 +1,11 @@
 from datetime import datetime
 from types import SimpleNamespace
 
-from app.services.llm_log_service import serialize_log_detail, serialize_log_item
+from app.services.llm_log_service import (
+    clear_llm_call_logs,
+    serialize_log_detail,
+    serialize_log_item,
+)
 
 
 def test_serialize_log_item_omits_summaries():
@@ -48,3 +52,22 @@ def test_serialize_log_detail_includes_summaries():
 
     assert result.request_summary == "request"
     assert result.error_message == "timeout"
+
+
+def test_clear_llm_call_logs_deletes_all_rows():
+    class FakeResult:
+        rowcount = 3
+
+    class FakeDb:
+        committed = False
+
+        def execute(self, _stmt):
+            return FakeResult()
+
+        def commit(self):
+            self.committed = True
+
+    db = FakeDb()
+
+    assert clear_llm_call_logs(db) == 3
+    assert db.committed is True

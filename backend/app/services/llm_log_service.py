@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models.llm_call_log import LlmCallLog
@@ -79,3 +79,9 @@ def list_llm_call_logs(
 def get_llm_call_log(db: Session, log_id: int) -> LlmCallLogDetail | None:
     log = db.scalar(select(LlmCallLog).where(LlmCallLog.id == log_id))
     return serialize_log_detail(log) if log else None
+
+
+def clear_llm_call_logs(db: Session) -> int:
+    result = db.execute(delete(LlmCallLog))
+    db.commit()
+    return int(result.rowcount or 0)

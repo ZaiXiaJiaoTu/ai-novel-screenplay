@@ -200,17 +200,92 @@
                   {{ selectedEpisode ? selectedEpisode.title : "剧本预览" }}
                 </div>
                 <el-tabs v-model="episodePreviewTab">
-                  <el-tab-pane label="YAML" name="yaml">
+                  <el-tab-pane label="中文表单编辑" name="form">
+                    <el-form class="episode-form-editor" label-position="top">
+                      <el-form-item label="分集标题">
+                        <el-input v-model="episodeEdit.title" :disabled="!selectedEpisode" />
+                      </el-form-item>
+                      <div class="settings-form-grid">
+                        <el-form-item label="剧本内标题">
+                          <el-input v-model="episodeForm.metadata.title" :disabled="!selectedEpisode" />
+                        </el-form-item>
+                        <el-form-item label="来源小说">
+                          <el-input v-model="episodeForm.metadata.source_book_title" disabled />
+                        </el-form-item>
+                        <el-form-item label="目标时长">
+                          <el-input-number
+                            v-model="episodeForm.metadata.target_duration"
+                            :min="1"
+                            :max="240"
+                            :disabled="!selectedEpisode"
+                          />
+                        </el-form-item>
+                      </div>
+                      <div class="episode-form-toolbar">
+                        <span class="page-subtitle">场景 {{ episodeForm.scenes.length }} 个</span>
+                        <el-button size="small" :disabled="!selectedEpisode" @click="addEpisodeScene">
+                          增加场景
+                        </el-button>
+                      </div>
+                      <el-collapse v-model="openSceneNames" class="episode-scene-collapse">
+                        <el-collapse-item
+                          v-for="(scene, sceneIndex) in episodeForm.scenes"
+                          :key="scene.local_id"
+                          :name="scene.local_id"
+                        >
+                          <template #title>
+                            {{ scene.scene_id || sceneIndex + 1 }}. {{ scene.scene_title || "未命名场景" }}
+                          </template>
+                          <div class="settings-form-grid">
+                            <el-form-item label="场景编号">
+                              <el-input v-model="scene.scene_id" />
+                            </el-form-item>
+                            <el-form-item label="场景标题">
+                              <el-input v-model="scene.scene_title" />
+                            </el-form-item>
+                            <el-form-item label="地点">
+                              <el-input v-model="scene.location" />
+                            </el-form-item>
+                            <el-form-item label="时间">
+                              <el-input v-model="scene.time" />
+                            </el-form-item>
+                          </div>
+                          <el-form-item label="出场人物（逗号分隔）">
+                            <el-input v-model="scene.characters_text" />
+                          </el-form-item>
+                          <el-form-item label="动作描写（每行一条）">
+                            <el-input v-model="scene.action_text" type="textarea" :rows="4" />
+                          </el-form-item>
+                          <el-form-item label="转场">
+                            <el-input v-model="scene.transition" />
+                          </el-form-item>
+                          <div class="episode-form-toolbar">
+                            <span class="page-subtitle">对白 {{ scene.dialogue.length }} 条</span>
+                            <div>
+                              <el-button size="small" @click="addDialogue(scene)">增加对白</el-button>
+                              <el-button size="small" type="danger" @click="removeScene(sceneIndex)">
+                                删除场景
+                              </el-button>
+                            </div>
+                          </div>
+                          <div
+                            v-for="(dialogue, dialogueIndex) in scene.dialogue"
+                            :key="dialogue.local_id"
+                            class="dialogue-row"
+                          >
+                            <el-input v-model="dialogue.speaker" placeholder="说话人" />
+                            <el-input v-model="dialogue.line" placeholder="台词" />
+                            <el-button link type="danger" @click="removeDialogue(scene, dialogueIndex)">
+                              删除
+                            </el-button>
+                          </div>
+                        </el-collapse-item>
+                      </el-collapse>
+                    </el-form>
+                  </el-tab-pane>
+                  <el-tab-pane label="YAML源码编辑" name="yaml">
                     <el-input
                       v-model="episodeEdit.yaml_content"
-                      type="textarea"
-                      :rows="18"
-                      :disabled="!selectedEpisode"
-                    />
-                  </el-tab-pane>
-                  <el-tab-pane label="TXT" name="txt">
-                    <el-input
-                      v-model="episodeEdit.plain_text_content"
                       type="textarea"
                       :rows="18"
                       :disabled="!selectedEpisode"
@@ -423,8 +498,9 @@ const editingProject = ref<ScriptAdaptationProject | null>(null);
 const editingEvent = ref<ScriptPlotEventDetail | null>(null);
 const editingCharacter = ref<ScriptCharacterDetail | null>(null);
 const activeModule = ref("events");
-const episodePreviewTab = ref("yaml");
+const episodePreviewTab = ref<"form" | "yaml">("form");
 const exportFormat = ref<"yaml" | "txt">("yaml");
+const openSceneNames = ref<string[]>([]);
 const loadingProjects = ref(false);
 const savingProject = ref(false);
 const splitting = ref(false);
@@ -452,7 +528,33 @@ const episodeConfig = reactive({
 const episodeEdit = reactive({
   title: "",
   yaml_content: "",
-  plain_text_content: ""
+  yaml_payload: null as Record<string, unknown> | null
+});
+type EpisodeDialogueForm = {
+  local_id: string;
+  speaker: string;
+  line: string;
+};
+type EpisodeSceneForm = {
+  local_id: string;
+  scene_id: string;
+  scene_title: string;
+  source_events: unknown[];
+  location: string;
+  time: string;
+  characters_text: string;
+  action_text: string;
+  transition: string;
+  dialogue: EpisodeDialogueForm[];
+};
+const episodeForm = reactive({
+  metadata: {
+    title: "",
+    source_book_title: "",
+    script_type: "",
+    target_duration: null as number | null
+  },
+  scenes: [] as EpisodeSceneForm[]
 });
 const eventForm = reactive({ content: "" });
 const characterForm = reactive({ name: "", profile: "" });
@@ -760,23 +862,174 @@ function selectEpisode(episode: ScriptEpisodeDetail) {
 function applyEpisodeEdit(episode: ScriptEpisodeDetail | null) {
   episodeEdit.title = episode?.title || "";
   episodeEdit.yaml_content = episode?.yaml_content || "";
-  episodeEdit.plain_text_content = episode?.plain_text_content || "";
+  episodeEdit.yaml_payload = episode?.yaml_payload || null;
+  applyEpisodeForm(episodeEdit.yaml_payload);
 }
 
 async function saveEpisode() {
   if (!selectedEpisode.value) return;
   savingEpisode.value = true;
   try {
+    const payload =
+      episodePreviewTab.value === "form"
+        ? {
+            title: episodeEdit.title,
+            yaml_payload: buildEpisodePayloadFromForm()
+          }
+        : {
+            title: episodeEdit.title,
+            yaml_content: episodeEdit.yaml_content
+          };
     selectedEpisode.value = await updateScriptEpisode(selectedEpisode.value.episode_id, {
-      title: episodeEdit.title,
-      yaml_content: episodeEdit.yaml_content,
-      plain_text_content: episodeEdit.plain_text_content
+      ...payload
     });
     await reloadSelectedData();
     ElMessage.success("剧本已保存");
   } finally {
     savingEpisode.value = false;
   }
+}
+
+function recordOf(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function arrayOf(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function stringListText(value: unknown) {
+  return arrayOf(value).map(String).join("\n");
+}
+
+function commaListText(value: unknown) {
+  return arrayOf(value).map(String).join("，");
+}
+
+function splitLines(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function splitComma(value: string) {
+  return value
+    .split(/[，,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function nextLocalId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function applyEpisodeForm(payload: Record<string, unknown> | null) {
+  const script = recordOf(payload?.script);
+  const metadata = recordOf(script.metadata);
+  episodeForm.metadata.title = String(metadata.title || "");
+  episodeForm.metadata.source_book_title = String(metadata.source_book_title || selectedProject.value?.book_title || "");
+  episodeForm.metadata.script_type = String(metadata.script_type || selectedProject.value?.adaptation_type || "");
+  episodeForm.metadata.target_duration =
+    typeof metadata.target_duration === "number"
+      ? metadata.target_duration
+      : selectedProject.value?.episode_duration || null;
+  episodeForm.scenes.splice(
+    0,
+    episodeForm.scenes.length,
+    ...arrayOf(script.scenes).map((item, index) => {
+      const scene = recordOf(item);
+      return {
+        local_id: nextLocalId("scene"),
+        scene_id: String(scene.scene_id || index + 1),
+        scene_title: String(scene.scene_title || ""),
+        source_events: arrayOf(scene.source_events),
+        location: String(scene.location || ""),
+        time: String(scene.time || ""),
+        characters_text: commaListText(scene.characters),
+        action_text: stringListText(scene.action),
+        transition: String(scene.transition || ""),
+        dialogue: arrayOf(scene.dialogue).map((dialogue) => {
+          const row = recordOf(dialogue);
+          return {
+            local_id: nextLocalId("dialogue"),
+            speaker: String(row.speaker || ""),
+            line: String(row.line || "")
+          };
+        })
+      };
+    })
+  );
+  openSceneNames.value = episodeForm.scenes.slice(0, 2).map((scene) => scene.local_id);
+}
+
+function buildEpisodePayloadFromForm(): Record<string, unknown> {
+  const existingScript = recordOf(episodeEdit.yaml_payload?.script);
+  const existingMetadata = recordOf(existingScript.metadata);
+  return {
+    script: {
+      ...existingScript,
+      metadata: {
+        ...existingMetadata,
+        episode_index: selectedEpisode.value?.episode_index,
+        title: episodeForm.metadata.title || episodeEdit.title,
+        source_book_title: episodeForm.metadata.source_book_title || selectedProject.value?.book_title,
+        script_type: episodeForm.metadata.script_type || selectedProject.value?.adaptation_type,
+        target_duration: episodeForm.metadata.target_duration || selectedProject.value?.episode_duration
+      },
+      scenes: episodeForm.scenes.map((scene) => ({
+        scene_id: scene.scene_id,
+        scene_title: scene.scene_title,
+        source_events: scene.source_events,
+        location: scene.location,
+        time: scene.time,
+        characters: splitComma(scene.characters_text),
+        action: splitLines(scene.action_text),
+        dialogue: scene.dialogue
+          .filter((dialogue) => dialogue.speaker.trim() || dialogue.line.trim())
+          .map((dialogue) => ({
+            speaker: dialogue.speaker.trim(),
+            line: dialogue.line.trim()
+          })),
+        transition: scene.transition
+      }))
+    }
+  };
+}
+
+function addEpisodeScene() {
+  const scene: EpisodeSceneForm = {
+    local_id: nextLocalId("scene"),
+    scene_id: String(episodeForm.scenes.length + 1),
+    scene_title: "",
+    source_events: [],
+    location: "",
+    time: "",
+    characters_text: "",
+    action_text: "",
+    transition: "",
+    dialogue: []
+  };
+  episodeForm.scenes.push(scene);
+  openSceneNames.value = [...openSceneNames.value, scene.local_id];
+}
+
+function removeScene(index: number) {
+  episodeForm.scenes.splice(index, 1);
+}
+
+function addDialogue(scene: EpisodeSceneForm) {
+  scene.dialogue.push({
+    local_id: nextLocalId("dialogue"),
+    speaker: "",
+    line: ""
+  });
+}
+
+function removeDialogue(scene: EpisodeSceneForm, index: number) {
+  scene.dialogue.splice(index, 1);
 }
 
 function downloadEpisode() {
