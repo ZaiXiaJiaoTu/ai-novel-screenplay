@@ -10,17 +10,17 @@ DEFAULT_PROMPT_TEMPLATES = [
         "user_prompt_template": (
             "小说名称：{book_title}\n"
             "改编参数：{adaptation_config}\n"
-            "已有结构化人物事实：{existing_characters}\n"
+            "已有结构化人物特征：{existing_characters}\n"
             "本批章节：{chapters}\n"
             "输出契约：{output_contract}\n\n"
             "任务：\n"
             "1. 将本批章节拆成若干剧情事件，剧情事件必须简洁、准确，使用中文。\n"
-            "2. 识别每个剧情事件涉及的人物，并对照已有结构化人物事实。\n"
-            "3. characters 只输出本批章节带来的新增事实或状态变化，禁止输出完整人物介绍，禁止重复已有事实。\n"
+            "2. 识别每个剧情事件涉及的人物，并对照已有结构化人物特征。\n"
+            "3. characters 只输出本批章节带来的关键特征、能力变化、人物性格或关系变化，禁止输出完整人物介绍，禁止重复已有特征。\n"
             "4. 不得写哈利波特、霍格沃茨、魔法学院等原文未出现的设定；也不得改写成其他作品。\n\n"
             "返回 JSON 字段：\n"
             "- events：按剧情顺序排列的数组，每项包含 content、source_chapter_start、source_chapter_end。\n"
-            "- characters：数组，每项包含 name、facts；facts 每项包含 fact_type、content。"
+            "- characters：数组，每项包含 name、traits；traits 每项包含 trait_type、content。"
         ),
         "output_format": "json",
         "variables": [
@@ -65,6 +65,30 @@ DEFAULT_PROMPT_TEMPLATES = [
             "chapters",
             "yaml_schema_delta",
         ],
+        "enabled": True,
+    },
+    {
+        "template_name": "Default character profile consolidation",
+        "task_type": "character_profile_consolidation",
+        "system_prompt": (
+            "你是中文剧本人物小传编辑。只根据输入的人物拆分输出进行整合，"
+            "不要引入原文没有的信息。只返回合法 JSON，不要返回 Markdown。"
+        ),
+        "user_prompt_template": (
+            "小说名称：{book_title}\n"
+            "人物拆分输出：{characters}\n\n"
+            "任务：\n"
+            "将每个人物的碎片化特征整合为简洁人物档案，只保留关键特征、性格、能力、关系和当前状态。\n"
+            "删除重复表达和语义相同内容，不要写成长篇百科。\n\n"
+            "返回 JSON：\n"
+            "{\n"
+            "  \"characters\": [\n"
+            "    {\"name\": \"人物名\", \"profile\": \"整合后人物档案\"}\n"
+            "  ]\n"
+            "}"
+        ),
+        "output_format": "json",
+        "variables": ["book_title", "characters"],
         "enabled": True,
     },
 ]
