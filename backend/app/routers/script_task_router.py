@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -9,6 +9,7 @@ from app.services.script_task_service import (
     create_script_task,
     get_artifact,
     get_script_task,
+    list_script_tasks,
     list_task_artifacts,
     retry_script_task,
     start_script_task,
@@ -27,6 +28,25 @@ def create_task(payload: ScriptTaskCreate, db: Session = Depends(get_db)):
     if result is None:
         raise HTTPException(status_code=404, detail="作品不存在")
     return success(result.model_dump())
+
+
+@router.get("/api/script-tasks")
+def list_tasks(
+    book_id: int | None = Query(default=None, ge=1),
+    status: str | None = None,
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    return success(
+        list_script_tasks(
+            db,
+            book_id=book_id,
+            status=status,
+            page=page,
+            size=size,
+        ).model_dump()
+    )
 
 
 @router.post("/api/script-tasks/{task_id}/start")

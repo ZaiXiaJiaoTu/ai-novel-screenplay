@@ -201,6 +201,14 @@ body {
   min-width: 0;
 }
 
+.task-history-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
 .script-selected-title {
   margin-bottom: 12px;
 }
@@ -298,6 +306,10 @@ body {
   }
 
   .profile-toolbar {
+    flex-direction: column;
+  }
+
+  .task-history-header {
     flex-direction: column;
   }
 }

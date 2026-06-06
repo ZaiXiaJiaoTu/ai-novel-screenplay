@@ -1,3 +1,4 @@
+from datetime import datetime
 from types import SimpleNamespace
 
 import yaml
@@ -10,6 +11,7 @@ from app.services.script_task_service import (
     get_task_progress,
     parse_script_yaml_response,
     save_generated_script_to_shelf,
+    serialize_task_list_item,
     strip_markdown_code_fence,
     sync_script_yaml_artifact_to_segment,
 )
@@ -44,6 +46,25 @@ def test_task_progress_uses_status_and_step():
 
     task.status = "completed"
     assert get_task_progress(task) == 100
+
+
+def test_serialize_task_list_item_includes_book_title_and_progress():
+    task = GenerationTask(
+        id=8,
+        book_id=3,
+        script_project_id=5,
+        status="running",
+        current_step="script_yaml",
+        created_at=datetime(2026, 6, 6),
+    )
+
+    result = serialize_task_list_item(task, "夜雨旧楼")
+
+    assert result.task_id == 8
+    assert result.book_id == 3
+    assert result.book_title == "夜雨旧楼"
+    assert result.script_project_id == 5
+    assert result.progress == 80
 
 
 def test_parse_script_yaml_response_accepts_markdown_fence():
