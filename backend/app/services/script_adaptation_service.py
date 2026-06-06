@@ -932,7 +932,6 @@ def export_episode(db: Session, episode_id: int, file_format: str) -> ExportFile
     db.add(
         ExportRecord(
             project_id=episode.project_id,
-            segment_id=None,
             export_type="episode",
             file_format=normalized,
             file_path=f"script_episode_{episode.id}.{normalized}",
@@ -966,7 +965,6 @@ def export_all_episodes(db: Session, project_id: int, file_format: str) -> Expor
     db.add(
         ExportRecord(
             project_id=project_id,
-            segment_id=None,
             export_type="episode_project",
             file_format=normalized,
             file_path=f"script_project_{project_id}_episodes.{normalized}",

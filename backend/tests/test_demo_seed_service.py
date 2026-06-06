@@ -14,7 +14,7 @@ def test_demo_seed_preview_has_complete_demo_flow():
 
     assert preview["book_title"] == DEMO_BOOK_TITLE
     assert preview["chapter_count"] == 3
-    assert preview["script_scene_count"] == 3
+    assert preview["script_scene_count"] == 2
     assert "summary_count" not in preview
 
 
@@ -29,13 +29,13 @@ def test_demo_script_yaml_is_parseable():
 
     assert parsed["script"]["metadata"]["source_book_id"] == "12"
     assert parsed["script"]["metadata"]["script_type"] == "short_drama"
-    assert len(parsed["script"]["scenes"]) == 3
+    assert len(parsed["script"]["scenes"]) == 2
 
 
 def test_demo_plain_text_contains_scene_dialogue():
     payload = build_demo_script_payload(book_id=1)
     plain_text = build_demo_plain_text(payload)
 
-    assert "Episode 1: The Letter" in plain_text
+    assert "Night Rain Old Building - Episode 1" in plain_text
     assert "S1. Rainy Return" in plain_text
     assert "Lin Xia:" in plain_text

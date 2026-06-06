@@ -16,5 +16,4 @@ class User(TimestampMixin, Base):
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     books = relationship("Book", back_populates="user")
-    generation_tasks = relationship("GenerationTask", back_populates="user")
     script_projects = relationship("ScriptProject", back_populates="user")

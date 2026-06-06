@@ -67,54 +67,6 @@ CREATE TABLE IF NOT EXISTS script_projects (
     is_deleted BOOLEAN DEFAULT FALSE NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS generation_tasks (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT REFERENCES users(id),
-    book_id BIGINT NOT NULL REFERENCES books(id),
-    script_project_id BIGINT REFERENCES script_projects(id),
-    task_type VARCHAR(100) NOT NULL,
-    status VARCHAR(50) DEFAULT 'pending' NOT NULL,
-    current_step VARCHAR(100),
-    adapt_scope JSONB,
-    generation_config JSONB,
-    error_message TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    finished_at TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS generation_artifacts (
-    id BIGSERIAL PRIMARY KEY,
-    task_id BIGINT NOT NULL REFERENCES generation_tasks(id),
-    artifact_type VARCHAR(100) NOT NULL,
-    content JSONB,
-    version INTEGER DEFAULT 1 NOT NULL,
-    editable BOOLEAN DEFAULT TRUE NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS script_segments (
-    id BIGSERIAL PRIMARY KEY,
-    project_id BIGINT NOT NULL REFERENCES script_projects(id),
-    book_id BIGINT NOT NULL REFERENCES books(id),
-    segment_name VARCHAR(255) NOT NULL,
-    adapt_scope JSONB,
-    style_source VARCHAR(50) DEFAULT 'inherit_project' NOT NULL,
-    style VARCHAR(100),
-    compression_level VARCHAR(50),
-    target_duration INTEGER,
-    actual_word_count INTEGER DEFAULT 0 NOT NULL,
-    scene_count INTEGER DEFAULT 0 NOT NULL,
-    yaml_content TEXT,
-    plain_text_content TEXT,
-    status VARCHAR(50) DEFAULT 'draft' NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    deleted_at TIMESTAMP,
-    is_deleted BOOLEAN DEFAULT FALSE NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS script_event_batches (
     id BIGSERIAL PRIMARY KEY,
     project_id BIGINT NOT NULL REFERENCES script_projects(id),
@@ -218,7 +170,6 @@ CREATE TABLE IF NOT EXISTS prompt_template_versions (
 
 CREATE TABLE IF NOT EXISTS llm_call_logs (
     id BIGSERIAL PRIMARY KEY,
-    task_id BIGINT REFERENCES generation_tasks(id),
     llm_config_id BIGINT REFERENCES llm_configs(id),
     prompt_template_id BIGINT REFERENCES prompt_templates(id),
     task_type VARCHAR(100) NOT NULL,
@@ -237,7 +188,6 @@ CREATE TABLE IF NOT EXISTS export_records (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT REFERENCES users(id),
     project_id BIGINT NOT NULL REFERENCES script_projects(id),
-    segment_id BIGINT REFERENCES script_segments(id),
     export_type VARCHAR(50) NOT NULL,
     file_format VARCHAR(50) NOT NULL,
     file_path VARCHAR(500) NOT NULL,
@@ -248,14 +198,10 @@ CREATE INDEX IF NOT EXISTS idx_books_user_id ON books(user_id);
 CREATE INDEX IF NOT EXISTS idx_books_novel_type ON books(novel_type);
 CREATE INDEX IF NOT EXISTS idx_chapters_book_id ON chapters(book_id);
 CREATE INDEX IF NOT EXISTS idx_chapters_book_index ON chapters(book_id, chapter_index);
-CREATE INDEX IF NOT EXISTS idx_generation_tasks_user_id ON generation_tasks(user_id);
-CREATE INDEX IF NOT EXISTS idx_generation_tasks_book_id ON generation_tasks(book_id);
 CREATE INDEX IF NOT EXISTS idx_script_projects_user_id ON script_projects(user_id);
 CREATE INDEX IF NOT EXISTS idx_script_projects_book_id ON script_projects(book_id);
-CREATE INDEX IF NOT EXISTS idx_script_segments_project_id ON script_segments(project_id);
 CREATE INDEX IF NOT EXISTS idx_script_event_batches_project_id ON script_event_batches(project_id);
 CREATE INDEX IF NOT EXISTS idx_script_plot_events_project_id ON script_plot_events(project_id);
 CREATE INDEX IF NOT EXISTS idx_script_characters_project_id ON script_character_profiles(project_id);
 CREATE INDEX IF NOT EXISTS idx_script_episodes_project_id ON script_episodes(project_id);
-CREATE INDEX IF NOT EXISTS idx_llm_call_logs_task_id ON llm_call_logs(task_id);
 CREATE INDEX IF NOT EXISTS idx_prompt_templates_task_type ON prompt_templates(task_type);

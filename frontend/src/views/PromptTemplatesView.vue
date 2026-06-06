@@ -130,10 +130,8 @@ import {
 } from "@/api/client";
 
 const taskOptions = [
-  "style_strategy_generation",
-  "scene_plan_generation",
-  "script_yaml_generation",
-  "yaml_repair"
+  "plot_event_split_generation",
+  "script_episode_generation"
 ];
 
 const templates = ref<PromptTemplateDetail[]>([]);

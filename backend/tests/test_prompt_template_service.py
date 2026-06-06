@@ -8,7 +8,7 @@ def test_serialize_prompt_template():
     template = SimpleNamespace(
         id=1,
         template_name="剧本 YAML 模板",
-        task_type="script_yaml_generation",
+        task_type="script_episode_generation",
         system_prompt="系统提示词",
         user_prompt_template="用户提示词 {{scene_plan}}",
         output_format="yaml",

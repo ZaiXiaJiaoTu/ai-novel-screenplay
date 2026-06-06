@@ -15,9 +15,6 @@ class ExportRecord(CreatedAtMixin, Base):
     project_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("script_projects.id"), nullable=False
     )
-    segment_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("script_segments.id"), nullable=True
-    )
     export_type: Mapped[str] = mapped_column(String(50), nullable=False)
     file_format: Mapped[str] = mapped_column(String(50), nullable=False)
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)

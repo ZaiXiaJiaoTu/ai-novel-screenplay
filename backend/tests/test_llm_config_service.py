@@ -24,7 +24,7 @@ def test_serialize_llm_config_hides_api_key():
         max_tokens = 4096
         timeout_seconds = 60
         retry_count = 2
-        task_scope = ["script_yaml_generation"]
+        task_scope = ["script_episode_generation"]
         is_default = True
         enabled = True
 

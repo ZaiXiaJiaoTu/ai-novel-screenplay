@@ -86,7 +86,6 @@ def call_llm_for_task(
     *,
     task_type: str,
     variables: dict[str, Any],
-    task_id: int | None = None,
     model_factory: Callable[[LlmConfig], Any] = build_chat_model,
 ) -> str:
     prompt_template = find_enabled_prompt_template(db, task_type)
@@ -101,7 +100,6 @@ def call_llm_for_task(
     user_prompt = render_prompt(prompt_template.user_prompt_template, variables)
     started_at = perf_counter()
     log = LlmCallLog(
-        task_id=task_id,
         llm_config_id=llm_config.id,
         prompt_template_id=prompt_template.id,
         task_type=task_type,
