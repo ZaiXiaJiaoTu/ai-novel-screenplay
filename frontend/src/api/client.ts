@@ -429,7 +429,11 @@ export async function createScriptTask(payload: ScriptTaskCreatePayload) {
 }
 
 export async function startScriptTask(taskId: number) {
-  return unwrap(await apiClient.post<ApiEnvelope<ScriptTaskDetail>>(`/script-tasks/${taskId}/start`));
+  return unwrap(
+    await apiClient.post<ApiEnvelope<ScriptTaskDetail>>(`/script-tasks/${taskId}/start`, undefined, {
+      timeout: 180000
+    })
+  );
 }
 
 export async function fetchScriptTask(taskId: number) {

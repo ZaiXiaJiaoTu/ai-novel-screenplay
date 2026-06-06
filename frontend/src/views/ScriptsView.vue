@@ -474,8 +474,11 @@ async function createAndStartTask() {
     currentTask.value = await startScriptTask(created.task_id);
     ElMessage.success("剧本生成任务已完成");
     taskDialogVisible.value = false;
-    await loadTasks();
-    await loadProjects();
+    try {
+      await Promise.all([loadTasks(), loadProjects()]);
+    } catch {
+      ElMessage.warning("剧本已生成，列表刷新失败，请手动刷新页面");
+    }
   } catch {
     ElMessage.error("剧本生成失败，请检查模型配置或后端日志");
   } finally {
