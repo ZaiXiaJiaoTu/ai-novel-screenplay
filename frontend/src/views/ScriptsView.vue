@@ -250,7 +250,9 @@
                           :name="scene.local_id"
                         >
                           <template #title>
-                            {{ scene.scene_id || sceneIndex + 1 }}. {{ scene.scene_title || "未命名场景" }}
+                            <span class="episode-scene-title">
+                              {{ scene.scene_id || sceneIndex + 1 }}. {{ scene.scene_title || "未命名场景" }}
+                            </span>
                           </template>
                           <div class="settings-form-grid">
                             <el-form-item label="场景编号">
@@ -1052,7 +1054,7 @@ function applyEpisodeForm(payload: Record<string, unknown> | null) {
       };
     })
   );
-  openSceneNames.value = episodeForm.scenes.slice(0, 2).map((scene) => scene.local_id);
+  openSceneNames.value = [];
 }
 
 function buildEpisodePayloadFromForm(): Record<string, unknown> {

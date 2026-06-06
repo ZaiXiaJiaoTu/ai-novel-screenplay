@@ -1,10 +1,20 @@
+from datetime import datetime
+
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
 from app.models.book import Book
 from app.models.chapter import Chapter
+from app.models.script_adaptation import (
+    ScriptCharacterFact,
+    ScriptCharacterProfile,
+    ScriptEpisode,
+    ScriptPlotEvent,
+)
+from app.models.script_project import ScriptProject
 from app.schemas.book_schema import (
     BookCreateResult,
+    BookDeleteResult,
     BookDetail,
     BookListItem,
     BookListResult,
@@ -117,6 +127,52 @@ def get_book_detail(db: Session, book_id: int) -> BookDetail | None:
         word_count=book.word_count,
         preprocess_status=book.preprocess_status,
     )
+
+
+def delete_book(db: Session, book_id: int) -> BookDeleteResult | None:
+    book = db.scalar(select(Book).where(Book.id == book_id, Book.is_deleted.is_(False)))
+    if book is None:
+        return None
+
+    deleted_at = datetime.utcnow()
+    book.is_deleted = True
+    book.deleted_at = deleted_at
+    for chapter in db.scalars(
+        select(Chapter).where(Chapter.book_id == book_id, Chapter.is_deleted.is_(False))
+    ):
+        chapter.is_deleted = True
+        chapter.deleted_at = deleted_at
+
+    project_ids = [
+        project.id
+        for project in db.scalars(
+            select(ScriptProject).where(
+                ScriptProject.book_id == book_id,
+                ScriptProject.is_deleted.is_(False),
+            )
+        )
+    ]
+    if project_ids:
+        for project in db.scalars(select(ScriptProject).where(ScriptProject.id.in_(project_ids))):
+            project.is_deleted = True
+            project.deleted_at = deleted_at
+        for model in (
+            ScriptPlotEvent,
+            ScriptCharacterFact,
+            ScriptCharacterProfile,
+            ScriptEpisode,
+        ):
+            for item in db.scalars(
+                select(model).where(
+                    model.project_id.in_(project_ids),
+                    model.is_deleted.is_(False),
+                )
+            ):
+                item.is_deleted = True
+                item.deleted_at = deleted_at
+
+    db.commit()
+    return BookDeleteResult(book_id=book_id, deleted=True)
 
 
 def list_book_chapters(db: Session, book_id: int) -> list[ChapterListItem] | None:

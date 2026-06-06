@@ -61,6 +61,22 @@ body {
   line-height: 1.6;
 }
 
+.home-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.workflow-card {
+  min-height: 150px;
+}
+
 .books-page {
   display: flex;
   flex-direction: column;
@@ -115,8 +131,9 @@ body {
 .book-list-item {
   width: 100%;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 8px;
   padding: 12px;
   border: 1px solid #e2e8f0;
@@ -125,6 +142,14 @@ body {
   color: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+.book-list-main {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .book-list-item:hover,
@@ -349,6 +374,12 @@ body {
 
 .episode-scene-collapse {
   border-top: 1px solid #e4e7ed;
+}
+
+.episode-scene-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1f2937;
 }
 
 .dialogue-row {

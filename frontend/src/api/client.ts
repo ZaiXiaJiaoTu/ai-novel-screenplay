@@ -260,6 +260,12 @@ export async function uploadBook(file: File, title?: string) {
   return unwrap(await apiClient.post<ApiEnvelope<BookCreateResult>>("/books/upload", formData));
 }
 
+export async function deleteBook(bookId: number) {
+  return unwrap(
+    await apiClient.delete<ApiEnvelope<{ book_id: number; deleted: boolean }>>(`/books/${bookId}`)
+  );
+}
+
 export async function fetchBookChapters(bookId: number) {
   return unwrap(
     await apiClient.get<ApiEnvelope<ChapterListItem[]>>(`/books/${bookId}/chapters`)

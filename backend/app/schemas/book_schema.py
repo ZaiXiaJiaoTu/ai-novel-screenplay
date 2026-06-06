@@ -12,6 +12,11 @@ class BookCreateResult(BaseModel):
     preprocess_status: str
 
 
+class BookDeleteResult(BaseModel):
+    book_id: int
+    deleted: bool
+
+
 class BookListItem(BaseModel):
     book_id: int
     title: str
