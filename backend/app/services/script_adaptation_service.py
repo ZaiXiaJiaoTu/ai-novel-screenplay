@@ -153,9 +153,13 @@ def serialize_event(event: ScriptPlotEvent) -> ScriptPlotEventDetail:
 
 
 def serialize_character(character: ScriptCharacterProfile) -> ScriptCharacterDetail:
+    metadata = character.metadata_json or {}
+    consolidated_profile = metadata.get("consolidated_profile")
     facts = getattr(character, "active_facts", None)
     profile = character.profile
-    if facts:
+    if consolidated_profile:
+        profile = str(consolidated_profile)
+    elif facts:
         profile = "\n".join(f"{index}. {fact.content}" for index, fact in enumerate(facts, start=1))
     return ScriptCharacterDetail(
         character_id=character.id,
@@ -1014,7 +1018,7 @@ def fallback_episode_payload(
                 {
                     "scene_id": index,
                     "scene_title": f"剧情事件 {event.event_index}",
-                    "source_events": [index],
+                    "source_events": [event.event_index],
                     "location": "",
                     "time": "",
                     "characters": [],
@@ -1029,8 +1033,9 @@ def fallback_episode_payload(
 
 
 def normalize_episode_source_events(payload: dict, events: list[ScriptPlotEvent]) -> dict:
-    id_to_local = {event.id: index for index, event in enumerate(events, start=1)}
-    global_index_to_local = {event.event_index: index for index, event in enumerate(events, start=1)}
+    id_to_global = {event.id: event.event_index for event in events}
+    local_to_global = {index: event.event_index for index, event in enumerate(events, start=1)}
+    valid_global = {event.event_index for event in events}
     valid_local = set(range(1, len(events) + 1))
     script = payload.get("script")
     if not isinstance(script, dict):
@@ -1050,11 +1055,13 @@ def normalize_episode_source_events(payload: dict, events: list[ScriptPlotEvent]
                 number = int(value)
             except (TypeError, ValueError):
                 continue
-            local = id_to_local.get(number) or global_index_to_local.get(number)
-            if local is None and number in valid_local:
-                local = number
-            if local is not None and local not in normalized:
-                normalized.append(local)
+            global_index = id_to_global.get(number)
+            if global_index is None and number in valid_global:
+                global_index = number
+            if global_index is None and number in valid_local:
+                global_index = local_to_global[number]
+            if global_index is not None and global_index not in normalized:
+                normalized.append(global_index)
         scene["source_events"] = normalized
     return payload
 
