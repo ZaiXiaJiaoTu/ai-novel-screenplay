@@ -23,7 +23,6 @@ CREATE TABLE IF NOT EXISTS books (
     word_count INTEGER DEFAULT 0 NOT NULL,
     chapter_count INTEGER DEFAULT 0 NOT NULL,
     preprocess_status VARCHAR(50) DEFAULT 'pending' NOT NULL,
-    story_profile_status VARCHAR(50) DEFAULT 'pending' NOT NULL,
     error_message TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -41,41 +40,6 @@ CREATE TABLE IF NOT EXISTS chapters (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     is_deleted BOOLEAN DEFAULT FALSE NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS chapter_summaries (
-    id BIGSERIAL PRIMARY KEY,
-    book_id BIGINT NOT NULL REFERENCES books(id),
-    chapter_id BIGINT NOT NULL REFERENCES chapters(id),
-    summary TEXT,
-    characters JSONB,
-    key_events JSONB,
-    locations JSONB,
-    clues JSONB,
-    emotion_changes JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS story_profiles (
-    id BIGSERIAL PRIMARY KEY,
-    book_id BIGINT NOT NULL UNIQUE REFERENCES books(id),
-    title VARCHAR(255),
-    genre VARCHAR(100),
-    overview TEXT,
-    world_setting TEXT,
-    main_conflict TEXT,
-    characters JSONB,
-    relationships JSONB,
-    key_events JSONB,
-    chapter_outlines JSONB,
-    clues JSONB,
-    tone VARCHAR(100),
-    locked_settings JSONB,
-    version INTEGER DEFAULT 1 NOT NULL,
-    confirmed BOOLEAN DEFAULT FALSE NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS script_projects (
@@ -220,7 +184,6 @@ CREATE INDEX IF NOT EXISTS idx_books_user_id ON books(user_id);
 CREATE INDEX IF NOT EXISTS idx_books_novel_type ON books(novel_type);
 CREATE INDEX IF NOT EXISTS idx_chapters_book_id ON chapters(book_id);
 CREATE INDEX IF NOT EXISTS idx_chapters_book_index ON chapters(book_id, chapter_index);
-CREATE INDEX IF NOT EXISTS idx_story_profiles_book_id ON story_profiles(book_id);
 CREATE INDEX IF NOT EXISTS idx_generation_tasks_user_id ON generation_tasks(user_id);
 CREATE INDEX IF NOT EXISTS idx_generation_tasks_book_id ON generation_tasks(book_id);
 CREATE INDEX IF NOT EXISTS idx_script_projects_user_id ON script_projects(user_id);

@@ -1,6 +1,7 @@
-from app.core.database import Base
-from app import models  # noqa: F401
 from sqlalchemy.orm import configure_mappers
+
+from app import models  # noqa: F401
+from app.core.database import Base
 
 
 def test_core_tables_are_registered():
@@ -8,8 +9,6 @@ def test_core_tables_are_registered():
         "users",
         "books",
         "chapters",
-        "chapter_summaries",
-        "story_profiles",
         "generation_tasks",
         "generation_artifacts",
         "script_projects",
@@ -22,6 +21,8 @@ def test_core_tables_are_registered():
     }
 
     assert expected_tables.issubset(Base.metadata.tables.keys())
+    assert "chapter_summaries" not in Base.metadata.tables
+    assert "story_profiles" not in Base.metadata.tables
 
 
 def test_model_relationships_can_be_configured():
