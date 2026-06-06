@@ -14,6 +14,20 @@ def test_render_prompt_replaces_variables():
     assert render_prompt("生成 {{title}} 的剧本", {"title": "长夜来信"}) == "生成 长夜来信 的剧本"
 
 
+def test_render_prompt_replaces_single_brace_variables_and_serializes_json():
+    result = render_prompt(
+        "小说：{title}\n章节：{chapters}",
+        {
+            "title": "斗罗大陆",
+            "chapters": [{"chapter_index": 1, "title": "斗罗觉醒"}],
+        },
+    )
+
+    assert "小说：斗罗大陆" in result
+    assert "{chapters}" not in result
+    assert '"title": "斗罗觉醒"' in result
+
+
 def test_summarize_text_collapses_and_truncates():
     result = summarize_text("a\n\n b " + "c" * 20, limit=10)
 

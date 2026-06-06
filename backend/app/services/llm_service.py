@@ -1,4 +1,5 @@
 from collections.abc import Callable
+import json
 from time import perf_counter
 from typing import Any
 
@@ -27,7 +28,12 @@ def summarize_text(value: str, limit: int = 500) -> str:
 def render_prompt(template: str, variables: dict[str, Any]) -> str:
     rendered = template
     for key, value in variables.items():
-        rendered = rendered.replace(f"{{{{{key}}}}}", str(value))
+        if isinstance(value, (dict, list)):
+            replacement = json.dumps(value, ensure_ascii=False, indent=2)
+        else:
+            replacement = str(value)
+        rendered = rendered.replace(f"{{{{{key}}}}}", replacement)
+        rendered = rendered.replace(f"{{{key}}}", replacement)
     return rendered
 
 
