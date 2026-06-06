@@ -1,0 +1,982 @@
+import json
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+import yaml
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.models.book import Book
+from app.models.chapter import Chapter
+from app.models.export_record import ExportRecord
+from app.models.script_adaptation import (
+    ScriptCharacterProfile,
+    ScriptEpisode,
+    ScriptEventBatch,
+    ScriptPlotEvent,
+)
+from app.models.script_project import ScriptProject
+from app.schemas.script_adaptation_schema import (
+    ScriptAdaptationConfigUpdate,
+    ScriptAdaptationCreate,
+    ScriptAdaptationProject,
+    ScriptAdaptationProjectList,
+    ScriptCharacterDetail,
+    ScriptCharacterUpdate,
+    ScriptEpisodeDetail,
+    ScriptEpisodeGeneratePayload,
+    ScriptEpisodeUpdate,
+    ScriptEventBatchDetail,
+    ScriptExportResult,
+    ScriptPlotEventDetail,
+    ScriptPlotEventUpdate,
+    ScriptWorkflowProgress,
+)
+from app.services.llm_service import LlmServiceError, call_llm_for_task
+from app.utils.chapter_parser import count_words
+
+
+TYPE_LABELS = {
+    "tv": "电视剧",
+    "short_drama": "短剧",
+    "animation": "动画",
+    "audio_drama": "广播剧",
+}
+PACING_LABELS = {"fast": "快", "medium": "适中", "slow": "慢"}
+LEVEL_LABELS = {"high": "高", "medium": "中", "low": "低"}
+CHAPTERS_PER_BATCH = 3
+
+
+def get_yaml_schema_delta(adaptation_type: str) -> dict:
+    base = {
+        "required": ["script.metadata", "script.scenes"],
+        "scene_required": [
+            "scene_id",
+            "scene_title",
+            "source_events",
+            "location",
+            "time",
+            "characters",
+            "action",
+            "dialogue",
+            "transition",
+        ],
+    }
+    type_delta = {
+        "tv": {
+            "metadata": {"format": "episode", "act_structure": "teaser/acts/tag"},
+            "scene_extra": ["act", "subplot_hint"],
+        },
+        "short_drama": {
+            "metadata": {"format": "short_drama_episode", "hook_required": True},
+            "scene_extra": ["hook", "cliffhanger"],
+        },
+        "animation": {
+            "metadata": {"format": "animation_episode"},
+            "scene_extra": ["visual_action", "sound_effects"],
+        },
+        "audio_drama": {
+            "metadata": {"format": "audio_drama_episode"},
+            "scene_extra": ["soundscape", "voice_direction"],
+        },
+    }
+    return {**base, **type_delta[adaptation_type]}
+
+
+def build_adaptation_config(project: ScriptProject) -> dict:
+    return {
+        "adaptation_type": project.script_type,
+        "adaptation_type_label": TYPE_LABELS.get(project.script_type or "", project.script_type),
+        "episode_duration": project.default_target_duration,
+        "pacing": project.pacing,
+        "pacing_label": PACING_LABELS.get(project.pacing, project.pacing),
+        "scene_frequency": project.scene_frequency,
+        "scene_frequency_label": LEVEL_LABELS.get(project.scene_frequency, project.scene_frequency),
+        "dialogue_density": project.dialogue_density,
+        "dialogue_density_label": LEVEL_LABELS.get(project.dialogue_density, project.dialogue_density),
+        "events_per_episode": project.events_per_episode,
+        "yaml_schema_delta": project.yaml_schema_delta or get_yaml_schema_delta(project.script_type or "short_drama"),
+    }
+
+
+def parse_json_payload(response_text: str) -> dict | None:
+    stripped = response_text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def list_project_chapters(db: Session, project: ScriptProject) -> list[Chapter]:
+    return list(
+        db.scalars(
+            select(Chapter)
+            .where(Chapter.book_id == project.book_id, Chapter.is_deleted.is_(False))
+            .order_by(Chapter.chapter_index)
+        ).all()
+    )
+
+
+def serialize_event(event: ScriptPlotEvent) -> ScriptPlotEventDetail:
+    return ScriptPlotEventDetail(
+        event_id=event.id,
+        batch_id=event.batch_id,
+        event_index=event.event_index,
+        content=event.content,
+        source_chapter_start=event.source_chapter_start,
+        source_chapter_end=event.source_chapter_end,
+        locked=event.locked,
+    )
+
+
+def serialize_character(character: ScriptCharacterProfile) -> ScriptCharacterDetail:
+    return ScriptCharacterDetail(
+        character_id=character.id,
+        name=character.name,
+        profile=character.profile,
+        metadata_json=character.metadata_json,
+    )
+
+
+def serialize_episode(episode: ScriptEpisode) -> ScriptEpisodeDetail:
+    return ScriptEpisodeDetail(
+        episode_id=episode.id,
+        episode_index=episode.episode_index,
+        title=episode.title,
+        event_ids=[int(item) for item in episode.event_ids],
+        yaml_content=episode.yaml_content,
+        plain_text_content=episode.plain_text_content,
+        status=episode.status,
+    )
+
+
+def get_project_counts(db: Session, project_id: int) -> tuple[int, int, int]:
+    event_count = db.scalar(
+        select(func.count())
+        .select_from(ScriptPlotEvent)
+        .where(ScriptPlotEvent.project_id == project_id, ScriptPlotEvent.is_deleted.is_(False))
+    ) or 0
+    character_count = db.scalar(
+        select(func.count())
+        .select_from(ScriptCharacterProfile)
+        .where(
+            ScriptCharacterProfile.project_id == project_id,
+            ScriptCharacterProfile.is_deleted.is_(False),
+        )
+    ) or 0
+    episode_count = db.scalar(
+        select(func.count())
+        .select_from(ScriptEpisode)
+        .where(ScriptEpisode.project_id == project_id, ScriptEpisode.is_deleted.is_(False))
+    ) or 0
+    return event_count, character_count, episode_count
+
+
+def serialize_project(
+    db: Session, project: ScriptProject, book_title: str
+) -> ScriptAdaptationProject:
+    event_count, character_count, episode_count = get_project_counts(db, project.id)
+    return ScriptAdaptationProject(
+        project_id=project.id,
+        book_id=project.book_id,
+        book_title=book_title,
+        project_name=project.project_name,
+        adaptation_type=project.script_type or "short_drama",
+        episode_duration=project.default_target_duration,
+        pacing=project.pacing,
+        scene_frequency=project.scene_frequency,
+        dialogue_density=project.dialogue_density,
+        events_per_episode=project.events_per_episode,
+        yaml_schema_delta=project.yaml_schema_delta,
+        split_status=project.split_status,
+        split_stop_requested=project.split_stop_requested,
+        generation_status=project.generation_status,
+        generation_stop_requested=project.generation_stop_requested,
+        event_count=event_count,
+        character_count=character_count,
+        episode_count=episode_count,
+    )
+
+
+def list_adaptation_projects(
+    db: Session, *, page: int = 1, size: int = 20
+) -> ScriptAdaptationProjectList:
+    stmt = (
+        select(ScriptProject, Book.title)
+        .join(Book, Book.id == ScriptProject.book_id)
+        .where(ScriptProject.is_deleted.is_(False), Book.is_deleted.is_(False))
+    )
+    total = db.scalar(
+        select(func.count()).select_from(ScriptProject).where(ScriptProject.is_deleted.is_(False))
+    ) or 0
+    rows = db.execute(
+        stmt.order_by(ScriptProject.created_at.desc(), ScriptProject.id.desc())
+        .offset((max(page, 1) - 1) * min(max(size, 1), 100))
+        .limit(min(max(size, 1), 100))
+    ).all()
+    return ScriptAdaptationProjectList(
+        records=[serialize_project(db, project, book_title) for project, book_title in rows],
+        total=total,
+    )
+
+
+def get_project_with_book(db: Session, project_id: int) -> tuple[ScriptProject, str] | None:
+    row = db.execute(
+        select(ScriptProject, Book.title)
+        .join(Book, Book.id == ScriptProject.book_id)
+        .where(
+            ScriptProject.id == project_id,
+            ScriptProject.is_deleted.is_(False),
+            Book.is_deleted.is_(False),
+        )
+    ).first()
+    return row if row else None
+
+
+def create_adaptation_project(
+    db: Session, payload: ScriptAdaptationCreate
+) -> ScriptAdaptationProject | None:
+    book = db.scalar(select(Book).where(Book.id == payload.book_id, Book.is_deleted.is_(False)))
+    if book is None:
+        return None
+    project = ScriptProject(
+        book_id=book.id,
+        project_name=payload.project_name.strip(),
+        script_type=payload.adaptation_type,
+        default_style=TYPE_LABELS[payload.adaptation_type],
+        default_compression_level=payload.pacing,
+        default_target_duration=payload.episode_duration,
+        pacing=payload.pacing,
+        scene_frequency=payload.scene_frequency,
+        dialogue_density=payload.dialogue_density,
+        events_per_episode=payload.events_per_episode,
+        yaml_schema_delta=get_yaml_schema_delta(payload.adaptation_type),
+        status="ongoing",
+    )
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    return serialize_project(db, project, book.title)
+
+
+def update_adaptation_config(
+    db: Session, project_id: int, payload: ScriptAdaptationConfigUpdate
+) -> ScriptAdaptationProject | None:
+    row = get_project_with_book(db, project_id)
+    if row is None:
+        return None
+    project, book_title = row
+    data = payload.model_dump(exclude_unset=True)
+    if "project_name" in data and data["project_name"] is not None:
+        project.project_name = data["project_name"].strip()
+    if "episode_duration" in data and data["episode_duration"] is not None:
+        project.default_target_duration = data["episode_duration"]
+    if "pacing" in data and data["pacing"] is not None:
+        project.pacing = data["pacing"]
+        project.default_compression_level = data["pacing"]
+    if "scene_frequency" in data and data["scene_frequency"] is not None:
+        project.scene_frequency = data["scene_frequency"]
+    if "dialogue_density" in data and data["dialogue_density"] is not None:
+        project.dialogue_density = data["dialogue_density"]
+    if "events_per_episode" in data and data["events_per_episode"] is not None:
+        project.events_per_episode = data["events_per_episode"]
+    db.commit()
+    db.refresh(project)
+    return serialize_project(db, project, book_title)
+
+
+def delete_adaptation_project(db: Session, project_id: int) -> bool | None:
+    project = db.scalar(
+        select(ScriptProject).where(
+            ScriptProject.id == project_id, ScriptProject.is_deleted.is_(False)
+        )
+    )
+    if project is None:
+        return None
+    project.is_deleted = True
+    project.deleted_at = datetime.utcnow()
+    for model in (ScriptPlotEvent, ScriptCharacterProfile, ScriptEpisode):
+        for item in db.scalars(
+            select(model).where(model.project_id == project_id, model.is_deleted.is_(False))
+        ):
+            item.is_deleted = True
+            item.deleted_at = datetime.utcnow()
+    db.commit()
+    return True
+
+
+def get_next_split_chapters(
+    db: Session, project: ScriptProject
+) -> tuple[int, list[Chapter]] | None:
+    chapters = list_project_chapters(db, project)
+    done_batches = db.scalar(
+        select(func.count())
+        .select_from(ScriptEventBatch)
+        .where(ScriptEventBatch.project_id == project.id)
+    ) or 0
+    start = done_batches * CHAPTERS_PER_BATCH
+    if start >= len(chapters):
+        return None
+    return done_batches + 1, chapters[start : start + CHAPTERS_PER_BATCH]
+
+
+def build_split_variables(project: ScriptProject, book_title: str, chapters: list[Chapter]) -> dict:
+    return {
+        "book_title": book_title,
+        "adaptation_config": build_adaptation_config(project),
+        "chapters": [
+            {
+                "chapter_index": chapter.chapter_index,
+                "title": chapter.title,
+                "content": chapter.content[:5000],
+            }
+            for chapter in chapters
+        ],
+        "output_contract": {
+            "events": ["简洁且准确的一段剧情事件"],
+            "characters": [{"name": "人物名", "profile": "人物特征与设定补充"}],
+        },
+    }
+
+
+def fallback_split_payload(chapters: list[Chapter]) -> dict:
+    events = [
+        {
+            "content": f"{chapter.title}：{chapter.content[:160]}",
+            "source_chapter_start": chapter.chapter_index,
+            "source_chapter_end": chapter.chapter_index,
+        }
+        for chapter in chapters
+    ]
+    return {"events": events, "characters": []}
+
+
+def normalize_split_payload(payload: dict | None, chapters: list[Chapter]) -> dict:
+    fallback = fallback_split_payload(chapters)
+    if not payload:
+        return fallback
+    events = payload.get("events")
+    characters = payload.get("characters")
+    if not isinstance(events, list) or not events:
+        events = fallback["events"]
+    if not isinstance(characters, list):
+        characters = []
+    return {"events": events, "characters": characters}
+
+
+def merge_characters(db: Session, project_id: int, characters: list[dict]) -> None:
+    existing = {
+        character.name: character
+        for character in db.scalars(
+            select(ScriptCharacterProfile).where(
+                ScriptCharacterProfile.project_id == project_id,
+                ScriptCharacterProfile.is_deleted.is_(False),
+            )
+        )
+    }
+    for item in characters:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        profile = str(item.get("profile") or item.get("description") or "").strip()
+        if not name:
+            continue
+        if name in existing:
+            if profile and profile not in existing[name].profile:
+                existing[name].profile = f"{existing[name].profile}\n{profile}".strip()
+            existing[name].metadata_json = item
+        else:
+            db.add(
+                ScriptCharacterProfile(
+                    project_id=project_id,
+                    name=name,
+                    profile=profile,
+                    metadata_json=item,
+                )
+            )
+
+
+def split_one_batch(db: Session, project_id: int) -> ScriptWorkflowProgress | None:
+    row = get_project_with_book(db, project_id)
+    if row is None:
+        return None
+    project, book_title = row
+    next_batch = get_next_split_chapters(db, project)
+    if next_batch is None:
+        project.split_status = "completed"
+        project.split_stop_requested = False
+        db.commit()
+        return get_progress(db, project_id)
+    batch_index, chapters = next_batch
+    project.split_status = "running"
+    db.commit()
+
+    variables = build_split_variables(project, book_title, chapters)
+    parsed_payload = None
+    try:
+        response_text = call_llm_for_task(
+            db,
+            task_type="plot_event_split_generation",
+            variables=variables,
+        )
+        parsed_payload = parse_json_payload(response_text)
+    except LlmServiceError:
+        parsed_payload = None
+    payload = normalize_split_payload(parsed_payload, chapters)
+
+    batch = ScriptEventBatch(
+        project_id=project.id,
+        book_id=project.book_id,
+        batch_index=batch_index,
+        chapter_start_index=chapters[0].chapter_index,
+        chapter_end_index=chapters[-1].chapter_index,
+        raw_response=payload,
+    )
+    db.add(batch)
+    db.flush()
+
+    current_max = db.scalar(
+        select(func.max(ScriptPlotEvent.event_index)).where(
+            ScriptPlotEvent.project_id == project.id
+        )
+    ) or 0
+    for offset, item in enumerate(payload["events"], start=1):
+        if isinstance(item, str):
+            content = item
+            start_chapter = chapters[0].chapter_index
+            end_chapter = chapters[-1].chapter_index
+        else:
+            content = str(item.get("content") or item.get("event") or "").strip()
+            start_chapter = int(item.get("source_chapter_start") or chapters[0].chapter_index)
+            end_chapter = int(item.get("source_chapter_end") or chapters[-1].chapter_index)
+        if content:
+            db.add(
+                ScriptPlotEvent(
+                    project_id=project.id,
+                    batch_id=batch.id,
+                    event_index=current_max + offset,
+                    content=content,
+                    source_chapter_start=start_chapter,
+                    source_chapter_end=end_chapter,
+                )
+            )
+    merge_characters(db, project.id, payload["characters"])
+    project.split_status = "stopped" if project.split_stop_requested else "idle"
+    project.split_stop_requested = False if project.split_stop_requested else project.split_stop_requested
+    db.commit()
+    return get_progress(db, project_id)
+
+
+def split_all_batches(db: Session, project_id: int) -> ScriptWorkflowProgress | None:
+    row = get_project_with_book(db, project_id)
+    if row is None:
+        return None
+    project, _book_title = row
+    project.split_stop_requested = False
+    db.commit()
+    while True:
+        progress = split_one_batch(db, project_id)
+        db.refresh(project)
+        if progress is None or project.split_stop_requested:
+            break
+        if get_next_split_chapters(db, project) is None:
+            project.split_status = "completed"
+            db.commit()
+            break
+    return get_progress(db, project_id)
+
+
+def stop_split(db: Session, project_id: int) -> ScriptWorkflowProgress | None:
+    row = get_project_with_book(db, project_id)
+    if row is None:
+        return None
+    project, _ = row
+    project.split_stop_requested = True
+    db.commit()
+    return get_progress(db, project_id)
+
+
+def get_batches(db: Session, project_id: int) -> list[ScriptEventBatchDetail] | None:
+    if get_project_with_book(db, project_id) is None:
+        return None
+    rows = db.execute(
+        select(ScriptEventBatch, func.count(ScriptPlotEvent.id))
+        .outerjoin(
+            ScriptPlotEvent,
+            (ScriptPlotEvent.batch_id == ScriptEventBatch.id)
+            & (ScriptPlotEvent.is_deleted.is_(False)),
+        )
+        .where(ScriptEventBatch.project_id == project_id)
+        .group_by(ScriptEventBatch.id)
+        .order_by(ScriptEventBatch.batch_index)
+    ).all()
+    return [
+        ScriptEventBatchDetail(
+            batch_id=batch.id,
+            batch_index=batch.batch_index,
+            chapter_start_index=batch.chapter_start_index,
+            chapter_end_index=batch.chapter_end_index,
+            status=batch.status,
+            event_count=count,
+        )
+        for batch, count in rows
+    ]
+
+
+def get_events(db: Session, project_id: int) -> list[ScriptPlotEventDetail] | None:
+    if get_project_with_book(db, project_id) is None:
+        return None
+    events = db.scalars(
+        select(ScriptPlotEvent)
+        .where(ScriptPlotEvent.project_id == project_id, ScriptPlotEvent.is_deleted.is_(False))
+        .order_by(ScriptPlotEvent.event_index)
+    ).all()
+    return [serialize_event(event) for event in events]
+
+
+def update_event(
+    db: Session, event_id: int, payload: ScriptPlotEventUpdate
+) -> ScriptPlotEventDetail | None:
+    event = db.scalar(
+        select(ScriptPlotEvent).where(
+            ScriptPlotEvent.id == event_id, ScriptPlotEvent.is_deleted.is_(False)
+        )
+    )
+    if event is None:
+        return None
+    if event.locked:
+        raise ValueError("已用于剧集生成的剧情事件不可编辑")
+    event.content = payload.content.strip()
+    db.commit()
+    db.refresh(event)
+    return serialize_event(event)
+
+
+def delete_event(db: Session, event_id: int) -> bool | None:
+    event = db.scalar(
+        select(ScriptPlotEvent).where(
+            ScriptPlotEvent.id == event_id, ScriptPlotEvent.is_deleted.is_(False)
+        )
+    )
+    if event is None:
+        return None
+    if event.locked:
+        raise ValueError("已用于剧集生成的剧情事件不可删除")
+    event.is_deleted = True
+    event.deleted_at = datetime.utcnow()
+    db.commit()
+    return True
+
+
+def get_characters(db: Session, project_id: int) -> list[ScriptCharacterDetail] | None:
+    if get_project_with_book(db, project_id) is None:
+        return None
+    characters = db.scalars(
+        select(ScriptCharacterProfile)
+        .where(
+            ScriptCharacterProfile.project_id == project_id,
+            ScriptCharacterProfile.is_deleted.is_(False),
+        )
+        .order_by(ScriptCharacterProfile.name)
+    ).all()
+    return [serialize_character(character) for character in characters]
+
+
+def update_character(
+    db: Session, character_id: int, payload: ScriptCharacterUpdate
+) -> ScriptCharacterDetail | None:
+    character = db.scalar(
+        select(ScriptCharacterProfile).where(
+            ScriptCharacterProfile.id == character_id,
+            ScriptCharacterProfile.is_deleted.is_(False),
+        )
+    )
+    if character is None:
+        return None
+    data = payload.model_dump(exclude_unset=True)
+    if "name" in data and data["name"] is not None:
+        character.name = data["name"].strip()
+    if "profile" in data and data["profile"] is not None:
+        character.profile = data["profile"]
+    if "metadata_json" in data:
+        character.metadata_json = data["metadata_json"]
+    db.commit()
+    db.refresh(character)
+    return serialize_character(character)
+
+
+def get_available_events(db: Session, project_id: int, limit: int) -> list[ScriptPlotEvent]:
+    return list(
+        db.scalars(
+            select(ScriptPlotEvent)
+            .where(
+                ScriptPlotEvent.project_id == project_id,
+                ScriptPlotEvent.is_deleted.is_(False),
+                ScriptPlotEvent.locked.is_(False),
+            )
+            .order_by(ScriptPlotEvent.event_index)
+            .limit(limit)
+        ).all()
+    )
+
+
+def get_event_source_chapters(
+    db: Session, project: ScriptProject, events: list[ScriptPlotEvent]
+) -> list[Chapter]:
+    if not events:
+        return []
+    start = min(event.source_chapter_start for event in events)
+    end = max(event.source_chapter_end for event in events)
+    return list(
+        db.scalars(
+            select(Chapter)
+            .where(
+                Chapter.book_id == project.book_id,
+                Chapter.is_deleted.is_(False),
+                Chapter.chapter_index >= start,
+                Chapter.chapter_index <= end,
+            )
+            .order_by(Chapter.chapter_index)
+        ).all()
+    )
+
+
+def build_episode_variables(
+    db: Session,
+    project: ScriptProject,
+    book_title: str,
+    events: list[ScriptPlotEvent],
+) -> dict:
+    characters = get_characters(db, project.id) or []
+    chapters = get_event_source_chapters(db, project, events)
+    return {
+        "book_title": book_title,
+        "adaptation_config": build_adaptation_config(project),
+        "events": [serialize_event(event).model_dump() for event in events],
+        "characters": [character.model_dump() for character in characters],
+        "chapters": [
+            {
+                "chapter_index": chapter.chapter_index,
+                "title": chapter.title,
+                "content": chapter.content[:5000],
+            }
+            for chapter in chapters
+        ],
+        "yaml_schema_delta": project.yaml_schema_delta,
+    }
+
+
+def parse_yaml_payload(response_text: str) -> dict | None:
+    stripped = response_text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    try:
+        parsed = yaml.safe_load(stripped)
+    except yaml.YAMLError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def fallback_episode_payload(
+    project: ScriptProject, episode_index: int, events: list[ScriptPlotEvent]
+) -> dict:
+    return {
+        "script": {
+            "metadata": {
+                "episode_index": episode_index,
+                "title": f"第 {episode_index} 集",
+                "script_type": project.script_type,
+                "target_duration": project.default_target_duration,
+            },
+            "scenes": [
+                {
+                    "scene_id": index,
+                    "scene_title": f"剧情事件 {event.event_index}",
+                    "source_events": [event.id],
+                    "location": "",
+                    "time": "",
+                    "characters": [],
+                    "action": [event.content],
+                    "dialogue": [],
+                    "transition": "",
+                }
+                for index, event in enumerate(events, start=1)
+            ],
+        }
+    }
+
+
+def build_episode_text(payload: dict) -> str:
+    script = payload.get("script") or {}
+    metadata = script.get("metadata") or {}
+    scenes = script.get("scenes") or []
+    lines = [metadata.get("title") or "剧本"]
+    for scene in scenes:
+        if isinstance(scene, dict):
+            lines.append(f"{scene.get('scene_id', '')}. {scene.get('scene_title', '')}".strip())
+            for action in scene.get("action") or []:
+                lines.append(str(action))
+            for dialogue in scene.get("dialogue") or []:
+                if isinstance(dialogue, dict):
+                    lines.append(f"{dialogue.get('speaker', '')}: {dialogue.get('line', '')}")
+    return "\n".join(line for line in lines if line).strip()
+
+
+def generate_one_episode(
+    db: Session, project_id: int, payload: ScriptEpisodeGeneratePayload | None = None
+) -> ScriptEpisodeDetail | None:
+    row = get_project_with_book(db, project_id)
+    if row is None:
+        return None
+    project, book_title = row
+    events_per_episode = payload.events_per_episode if payload and payload.events_per_episode else project.events_per_episode
+    events = get_available_events(db, project.id, events_per_episode)
+    if len(events) < events_per_episode:
+        raise ValueError("未锁定剧情事件不足一集额度，暂不生成新剧集")
+
+    next_index = (
+        db.scalar(
+            select(func.max(ScriptEpisode.episode_index)).where(
+                ScriptEpisode.project_id == project.id
+            )
+        )
+        or 0
+    ) + 1
+    project.generation_status = "running"
+    db.commit()
+
+    variables = build_episode_variables(db, project, book_title, events)
+    parsed = None
+    try:
+        response_text = call_llm_for_task(
+            db,
+            task_type="script_episode_generation",
+            variables=variables,
+        )
+        parsed = parse_yaml_payload(response_text)
+    except LlmServiceError:
+        parsed = None
+    script_payload = parsed or fallback_episode_payload(project, next_index, events)
+    yaml_content = yaml.safe_dump(script_payload, allow_unicode=True, sort_keys=False)
+    plain_text = build_episode_text(script_payload)
+    episode = ScriptEpisode(
+        project_id=project.id,
+        episode_index=next_index,
+        title=f"第 {next_index} 集",
+        event_ids=[event.id for event in events],
+        yaml_content=yaml_content,
+        plain_text_content=plain_text,
+        status="completed",
+    )
+    db.add(episode)
+    for event in events:
+        event.locked = True
+    project.generation_status = (
+        "stopped" if project.generation_stop_requested else "idle"
+    )
+    project.generation_stop_requested = False if project.generation_stop_requested else project.generation_stop_requested
+    db.commit()
+    db.refresh(episode)
+    return serialize_episode(episode)
+
+
+def generate_all_episodes(
+    db: Session, project_id: int, payload: ScriptEpisodeGeneratePayload | None = None
+) -> list[ScriptEpisodeDetail] | None:
+    row = get_project_with_book(db, project_id)
+    if row is None:
+        return None
+    project, _ = row
+    project.generation_stop_requested = False
+    db.commit()
+    episodes: list[ScriptEpisodeDetail] = []
+    while True:
+        events_per_episode = payload.events_per_episode if payload and payload.events_per_episode else project.events_per_episode
+        if len(get_available_events(db, project.id, events_per_episode)) < events_per_episode:
+            project.generation_status = "completed"
+            db.commit()
+            break
+        episode = generate_one_episode(db, project_id, payload)
+        if episode is not None:
+            episodes.append(episode)
+        db.refresh(project)
+        if project.generation_stop_requested:
+            project.generation_status = "stopped"
+            project.generation_stop_requested = False
+            db.commit()
+            break
+    return episodes
+
+
+def stop_episode_generation(db: Session, project_id: int) -> ScriptWorkflowProgress | None:
+    row = get_project_with_book(db, project_id)
+    if row is None:
+        return None
+    project, _ = row
+    project.generation_stop_requested = True
+    db.commit()
+    return get_progress(db, project_id)
+
+
+def get_episodes(db: Session, project_id: int) -> list[ScriptEpisodeDetail] | None:
+    if get_project_with_book(db, project_id) is None:
+        return None
+    episodes = db.scalars(
+        select(ScriptEpisode)
+        .where(ScriptEpisode.project_id == project_id, ScriptEpisode.is_deleted.is_(False))
+        .order_by(ScriptEpisode.episode_index)
+    ).all()
+    return [serialize_episode(episode) for episode in episodes]
+
+
+def update_episode(
+    db: Session, episode_id: int, payload: ScriptEpisodeUpdate
+) -> ScriptEpisodeDetail | None:
+    episode = db.scalar(
+        select(ScriptEpisode).where(
+            ScriptEpisode.id == episode_id, ScriptEpisode.is_deleted.is_(False)
+        )
+    )
+    if episode is None:
+        return None
+    data = payload.model_dump(exclude_unset=True)
+    if "title" in data and data["title"] is not None:
+        episode.title = data["title"].strip()
+    if "yaml_content" in data:
+        episode.yaml_content = data["yaml_content"]
+    if "plain_text_content" in data:
+        episode.plain_text_content = data["plain_text_content"]
+    episode.status = "draft"
+    db.commit()
+    db.refresh(episode)
+    return serialize_episode(episode)
+
+
+def get_progress(db: Session, project_id: int) -> ScriptWorkflowProgress | None:
+    row = get_project_with_book(db, project_id)
+    if row is None:
+        return None
+    project, _ = row
+    chapter_count = len(list_project_chapters(db, project))
+    batches = get_batches(db, project_id) or []
+    split_chapter_count = sum(
+        batch.chapter_end_index - batch.chapter_start_index + 1 for batch in batches
+    )
+    event_count = db.scalar(
+        select(func.count())
+        .select_from(ScriptPlotEvent)
+        .where(ScriptPlotEvent.project_id == project_id, ScriptPlotEvent.is_deleted.is_(False))
+    ) or 0
+    locked_event_count = db.scalar(
+        select(func.count())
+        .select_from(ScriptPlotEvent)
+        .where(
+            ScriptPlotEvent.project_id == project_id,
+            ScriptPlotEvent.is_deleted.is_(False),
+            ScriptPlotEvent.locked.is_(True),
+        )
+    ) or 0
+    episode_count = db.scalar(
+        select(func.count())
+        .select_from(ScriptEpisode)
+        .where(ScriptEpisode.project_id == project_id, ScriptEpisode.is_deleted.is_(False))
+    ) or 0
+    return ScriptWorkflowProgress(
+        project_id=project_id,
+        chapter_count=chapter_count,
+        split_chapter_count=min(split_chapter_count, chapter_count),
+        batch_count=len(batches),
+        event_count=event_count,
+        locked_event_count=locked_event_count,
+        episode_count=episode_count,
+        split_status=project.split_status,
+        split_stop_requested=project.split_stop_requested,
+        generation_status=project.generation_status,
+        generation_stop_requested=project.generation_stop_requested,
+    )
+
+
+@dataclass(frozen=True)
+class ExportFile:
+    filename: str
+    content: str
+    media_type: str
+
+
+def export_episode(db: Session, episode_id: int, file_format: str) -> ExportFile | None:
+    episode = db.scalar(
+        select(ScriptEpisode).where(
+            ScriptEpisode.id == episode_id, ScriptEpisode.is_deleted.is_(False)
+        )
+    )
+    if episode is None:
+        return None
+    normalized = file_format.lower()
+    if normalized not in {"yaml", "txt"}:
+        raise ValueError("only yaml and txt export are supported")
+    content = episode.yaml_content if normalized == "yaml" else episode.plain_text_content
+    db.add(
+        ExportRecord(
+            project_id=episode.project_id,
+            segment_id=None,
+            export_type="episode",
+            file_format=normalized,
+            file_path=f"script_episode_{episode.id}.{normalized}",
+        )
+    )
+    db.commit()
+    return ExportFile(
+        filename=f"script_episode_{episode.id}.{normalized}",
+        content=content or "",
+        media_type="application/x-yaml; charset=utf-8"
+        if normalized == "yaml"
+        else "text/plain; charset=utf-8",
+    )
+
+
+def export_all_episodes(db: Session, project_id: int, file_format: str) -> ExportFile | None:
+    if get_project_with_book(db, project_id) is None:
+        return None
+    normalized = file_format.lower()
+    if normalized not in {"yaml", "txt"}:
+        raise ValueError("only yaml and txt export are supported")
+    episodes = db.scalars(
+        select(ScriptEpisode)
+        .where(ScriptEpisode.project_id == project_id, ScriptEpisode.is_deleted.is_(False))
+        .order_by(ScriptEpisode.episode_index)
+    ).all()
+    if normalized == "yaml":
+        content = "\n---\n".join(episode.yaml_content or "" for episode in episodes)
+    else:
+        content = "\n\n".join(episode.plain_text_content or "" for episode in episodes)
+    db.add(
+        ExportRecord(
+            project_id=project_id,
+            segment_id=None,
+            export_type="episode_project",
+            file_format=normalized,
+            file_path=f"script_project_{project_id}_episodes.{normalized}",
+        )
+    )
+    db.commit()
+    return ExportFile(
+        filename=f"script_project_{project_id}_episodes.{normalized}",
+        content=content,
+        media_type="application/x-yaml; charset=utf-8"
+        if normalized == "yaml"
+        else "text/plain; charset=utf-8",
+    )

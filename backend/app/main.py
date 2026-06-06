@@ -13,6 +13,7 @@ from app.routers.llm_config_router import router as llm_config_router
 from app.routers.llm_log_router import router as llm_log_router
 from app.routers.prompt_template_router import router as prompt_template_router
 from app.routers.script_project_router import router as script_project_router
+from app.routers.script_adaptation_router import router as script_adaptation_router
 from app.routers.script_task_router import router as script_task_router
 
 
@@ -34,6 +35,7 @@ app.add_middleware(
 app.include_router(book_router)
 app.include_router(chapter_router)
 app.include_router(script_task_router)
+app.include_router(script_adaptation_router)
 app.include_router(script_project_router)
 app.include_router(export_router)
 app.include_router(llm_config_router)
