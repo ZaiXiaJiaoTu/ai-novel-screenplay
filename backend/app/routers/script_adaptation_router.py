@@ -15,6 +15,7 @@ from app.schemas.script_adaptation_schema import (
     ScriptPlotEventUpdate,
 )
 from app.services.script_adaptation_service import (
+    consolidate_character_profiles,
     create_adaptation_project,
     delete_adaptation_project,
     delete_event,
@@ -198,6 +199,14 @@ def post_episode_all(
     if result is None:
         raise HTTPException(status_code=404, detail="script project not found")
     return success(result.model_dump())
+
+
+@router.post("/{project_id}/characters/consolidate")
+def post_character_consolidate(project_id: int, db: Session = Depends(get_db)):
+    result = consolidate_character_profiles(db, project_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="script project not found")
+    return success([item.model_dump() for item in result])
 
 
 @router.post("/{project_id}/episodes/stop")

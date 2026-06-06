@@ -517,6 +517,16 @@ export async function fetchScriptCharacters(projectId: number) {
   );
 }
 
+export async function consolidateScriptCharacters(projectId: number) {
+  return unwrap(
+    await apiClient.post<ApiEnvelope<ScriptCharacterDetail[]>>(
+      `/script-adaptations/${projectId}/characters/consolidate`,
+      undefined,
+      { timeout: 180000 }
+    )
+  );
+}
+
 export async function updateScriptCharacter(
   characterId: number,
   payload: { name?: string; profile?: string; metadata_json?: Record<string, unknown> | null }

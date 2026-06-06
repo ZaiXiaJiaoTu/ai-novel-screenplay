@@ -371,8 +371,8 @@ def build_character_context(db: Session, project_id: int) -> list[dict]:
         result.append(
             {
                 "name": character.name,
-                "facts": [
-                    {"fact_type": fact.fact_type, "content": fact.content}
+                "traits": [
+                    {"trait_type": fact.fact_type, "content": fact.content}
                     for fact in facts
                 ],
             }
@@ -402,8 +402,8 @@ def build_split_variables(
                     "name": "人物名",
                     "facts": [
                         {
-                            "fact_type": "身份/关系/能力/状态/态度/目标/其他",
-                            "content": "只写本批章节带来的新增或变化事实，不写完整人物介绍",
+                            "trait_type": "关键特征/性格/能力/关系/当前状态",
+                            "content": "只写本批章节带来的新增关键特征或性格变化，不写完整人物介绍",
                         }
                     ],
                 }
@@ -442,17 +442,29 @@ def normalize_fact_content(value: str) -> str:
 
 
 def extract_character_facts(item: dict) -> list[dict]:
-    facts = item.get("facts")
+    facts = item.get("traits") or item.get("features") or item.get("facts")
     if isinstance(facts, list):
         result = []
         for fact in facts:
             if isinstance(fact, str):
-                result.append({"fact_type": "设定", "content": fact.strip()})
+                result.append({"fact_type": "关键特征", "content": fact.strip()})
             elif isinstance(fact, dict):
                 result.append(
                     {
-                        "fact_type": str(fact.get("fact_type") or fact.get("type") or "设定"),
-                        "content": str(fact.get("content") or fact.get("fact") or "").strip(),
+                        "fact_type": str(
+                            fact.get("trait_type")
+                            or fact.get("feature_type")
+                            or fact.get("fact_type")
+                            or fact.get("type")
+                            or "关键特征"
+                        ),
+                        "content": str(
+                            fact.get("content")
+                            or fact.get("trait")
+                            or fact.get("feature")
+                            or fact.get("fact")
+                            or ""
+                        ).strip(),
                     }
                 )
         return result
@@ -758,6 +770,82 @@ def get_characters(db: Session, project_id: int) -> list[ScriptCharacterDetail] 
     return [serialize_character(character) for character in characters]
 
 
+def normalize_consolidated_character_payload(payload: dict | None) -> list[dict]:
+    if not payload:
+        return []
+    characters = payload.get("characters")
+    return characters if isinstance(characters, list) else []
+
+
+def consolidate_character_profiles(db: Session, project_id: int) -> list[ScriptCharacterDetail] | None:
+    row = get_project_with_book(db, project_id)
+    if row is None:
+        return None
+    _project, book_title = row
+    characters = db.scalars(
+        select(ScriptCharacterProfile)
+        .where(
+            ScriptCharacterProfile.project_id == project_id,
+            ScriptCharacterProfile.is_deleted.is_(False),
+        )
+        .order_by(ScriptCharacterProfile.name)
+    ).all()
+    if not characters:
+        return []
+    variables = {
+        "book_title": book_title,
+        "characters": [
+            {
+                "name": character.name,
+                "profile": character.profile,
+                "traits": [
+                    {"trait_type": fact.fact_type, "content": fact.content}
+                    for fact in db.scalars(
+                        select(ScriptCharacterFact)
+                        .where(
+                            ScriptCharacterFact.character_id == character.id,
+                            ScriptCharacterFact.is_deleted.is_(False),
+                            ScriptCharacterFact.status == "active",
+                        )
+                        .order_by(ScriptCharacterFact.id)
+                    )
+                ],
+            }
+            for character in characters
+        ],
+    }
+    parsed_payload = None
+    try:
+        response_text = call_llm_for_task(
+            db,
+            task_type="character_profile_consolidation",
+            variables=variables,
+        )
+        parsed_payload = parse_json_payload(response_text)
+    except LlmServiceError:
+        parsed_payload = None
+
+    by_name = {character.name: character for character in characters}
+    updated = False
+    for item in normalize_consolidated_character_payload(parsed_payload):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        profile = str(item.get("profile") or "").strip()
+        if name in by_name and profile:
+            by_name[name].profile = profile
+            by_name[name].metadata_json = {
+                **(by_name[name].metadata_json or {}),
+                "consolidated_profile": profile,
+            }
+            updated = True
+    if not updated:
+        for character in characters:
+            rebuild_character_profile(db, character)
+    db.commit()
+    return get_characters(db, project_id)
+
+
 def update_character(
     db: Session, character_id: int, payload: ScriptCharacterUpdate
 ) -> ScriptCharacterDetail | None:
@@ -975,15 +1063,52 @@ def build_episode_text(payload: dict) -> str:
     script = payload.get("script") or {}
     metadata = script.get("metadata") or {}
     scenes = script.get("scenes") or []
-    lines = [metadata.get("title") or "剧本"]
-    for scene in scenes:
+    title = metadata.get("title") or "剧本"
+    lines = [f"《{title}》"]
+    if metadata.get("source_book_title"):
+        lines.append(f"来源小说：{metadata.get('source_book_title')}")
+    if metadata.get("episode_index"):
+        lines.append(f"集数：第 {metadata.get('episode_index')} 集")
+    if metadata.get("target_duration"):
+        lines.append(f"目标时长：{metadata.get('target_duration')} 分钟")
+    for index, scene in enumerate(scenes, start=1):
         if isinstance(scene, dict):
-            lines.append(f"{scene.get('scene_id', '')}. {scene.get('scene_title', '')}".strip())
-            for action in scene.get("action") or []:
-                lines.append(str(action))
-            for dialogue in scene.get("dialogue") or []:
+            scene_id = scene.get("scene_id") or index
+            scene_title = scene.get("scene_title") or f"场景 {index}"
+            lines.extend(["", f"场景 {scene_id}：{scene_title}"])
+            if scene.get("location"):
+                lines.append(f"地点：{scene.get('location')}")
+            if scene.get("time"):
+                lines.append(f"时间：{scene.get('time')}")
+            characters = scene.get("characters") or []
+            if isinstance(characters, list) and characters:
+                lines.append(f"人物：{'、'.join(str(item) for item in characters)}")
+            actions = (
+                scene.get("action")
+                or scene.get("actions")
+                or scene.get("action_lines")
+                or scene.get("description")
+                or scene.get("summary")
+                or []
+            )
+            if isinstance(actions, str):
+                actions = [actions]
+            if actions:
+                lines.append("动作：")
+                for action in actions:
+                    lines.append(f"  {action}")
+            dialogues = scene.get("dialogue") or scene.get("dialogues") or scene.get("lines") or []
+            if dialogues:
+                lines.append("对白：")
+            for dialogue in dialogues:
                 if isinstance(dialogue, dict):
-                    lines.append(f"{dialogue.get('speaker', '')}: {dialogue.get('line', '')}")
+                    speaker = dialogue.get("speaker") or dialogue.get("character") or ""
+                    line = dialogue.get("line") or dialogue.get("content") or dialogue.get("text") or ""
+                    lines.append(f"  {speaker}：{line}" if speaker else f"  {line}")
+                elif dialogue:
+                    lines.append(f"  {dialogue}")
+            if scene.get("transition"):
+                lines.append(f"转场：{scene.get('transition')}")
     return "\n".join(line for line in lines if line).strip()
 
 

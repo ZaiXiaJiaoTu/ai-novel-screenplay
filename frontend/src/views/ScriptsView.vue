@@ -151,6 +151,16 @@
           </el-tab-pane>
 
           <el-tab-pane label="人物" name="characters">
+            <div class="module-actions">
+              <el-button
+                type="primary"
+                :disabled="!selectedProject || characters.length === 0"
+                :loading="consolidatingCharacters"
+                @click="consolidateCharacters"
+              >
+                AI整合人物档案
+              </el-button>
+            </div>
             <el-table :data="characters" empty-text="暂无人物档案">
               <el-table-column prop="name" label="人物" width="180" />
               <el-table-column prop="profile" label="档案" min-width="420" show-overflow-tooltip />
@@ -466,6 +476,7 @@ import {
   type ScriptEventBatchDetail,
   type ScriptPlotEventDetail,
   type ScriptWorkflowProgress,
+  consolidateScriptCharacters,
   createScriptAdaptation,
   deleteScriptAdaptation,
   deleteScriptPlotEvent,
@@ -510,6 +521,7 @@ const loadingProjects = ref(false);
 const savingProject = ref(false);
 const splitting = ref(false);
 const generatingEpisode = ref(false);
+const consolidatingCharacters = ref(false);
 const savingEpisode = ref(false);
 const savingEvent = ref(false);
 const savingCharacter = ref(false);
@@ -836,6 +848,19 @@ async function saveCharacter() {
   }
 }
 
+async function consolidateCharacters() {
+  if (!selectedProject.value) return;
+  consolidatingCharacters.value = true;
+  try {
+    characters.value = await consolidateScriptCharacters(selectedProject.value.project_id);
+    ElMessage.success("人物档案已整合");
+  } catch {
+    ElMessage.error("人物档案整合失败");
+  } finally {
+    consolidatingCharacters.value = false;
+  }
+}
+
 async function generateEpisodeOnce() {
   if (!selectedProject.value) return;
   generatingEpisode.value = true;
@@ -959,6 +984,9 @@ function arrayOf(value: unknown): unknown[] {
 }
 
 function stringListText(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
   return arrayOf(value).map(String).join("\n");
 }
 
@@ -999,6 +1027,9 @@ function applyEpisodeForm(payload: Record<string, unknown> | null) {
     episodeForm.scenes.length,
     ...arrayOf(script.scenes).map((item, index) => {
       const scene = recordOf(item);
+      const actionValue =
+        scene.action ?? scene.actions ?? scene.action_lines ?? scene.description ?? scene.summary;
+      const dialogueValue = scene.dialogue ?? scene.dialogues ?? scene.lines;
       return {
         local_id: nextLocalId("scene"),
         scene_id: String(scene.scene_id || index + 1),
@@ -1007,9 +1038,9 @@ function applyEpisodeForm(payload: Record<string, unknown> | null) {
         location: String(scene.location || ""),
         time: String(scene.time || ""),
         characters_text: commaListText(scene.characters),
-        action_text: stringListText(scene.action),
+        action_text: stringListText(actionValue),
         transition: String(scene.transition || ""),
-        dialogue: arrayOf(scene.dialogue).map((dialogue) => {
+        dialogue: arrayOf(dialogueValue).map((dialogue) => {
           const row = recordOf(dialogue);
           return {
             local_id: nextLocalId("dialogue"),
