@@ -1,7 +1,7 @@
 ﻿from datetime import datetime
 
 import yaml
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.book import Book
@@ -16,6 +16,8 @@ from app.schemas.script_task_schema import (
     ScriptTaskCreate,
     ScriptTaskCreateResult,
     ScriptTaskDetail,
+    ScriptTaskListItem,
+    ScriptTaskListResult,
 )
 from app.services.llm_service import LlmServiceError, call_llm_for_task
 from app.utils.chapter_parser import count_words
@@ -45,6 +47,21 @@ def serialize_task(task: GenerationTask) -> ScriptTaskDetail:
         current_step=task.current_step,
         progress=get_task_progress(task),
         error_message=task.error_message,
+    )
+
+
+def serialize_task_list_item(task: GenerationTask, book_title: str) -> ScriptTaskListItem:
+    return ScriptTaskListItem(
+        task_id=task.id,
+        book_id=task.book_id,
+        book_title=book_title,
+        script_project_id=task.script_project_id,
+        status=task.status,
+        current_step=task.current_step,
+        progress=get_task_progress(task),
+        error_message=task.error_message,
+        created_at=task.created_at,
+        finished_at=task.finished_at,
     )
 
 
@@ -78,6 +95,46 @@ def create_script_task(db: Session, payload: ScriptTaskCreate) -> ScriptTaskCrea
     db.commit()
     db.refresh(task)
     return ScriptTaskCreateResult(task_id=task.id, status=task.status)
+
+
+def list_script_tasks(
+    db: Session,
+    *,
+    book_id: int | None = None,
+    status: str | None = None,
+    page: int = 1,
+    size: int = 20,
+) -> ScriptTaskListResult:
+    stmt = (
+        select(GenerationTask, Book.title)
+        .join(Book, Book.id == GenerationTask.book_id)
+        .where(GenerationTask.task_type == "script_generation", Book.is_deleted.is_(False))
+    )
+    count_stmt = (
+        select(func.count())
+        .select_from(GenerationTask)
+        .join(Book, Book.id == GenerationTask.book_id)
+        .where(GenerationTask.task_type == "script_generation", Book.is_deleted.is_(False))
+    )
+    if book_id is not None:
+        stmt = stmt.where(GenerationTask.book_id == book_id)
+        count_stmt = count_stmt.where(GenerationTask.book_id == book_id)
+    if status:
+        stmt = stmt.where(GenerationTask.status == status)
+        count_stmt = count_stmt.where(GenerationTask.status == status)
+
+    page = max(page, 1)
+    size = min(max(size, 1), 100)
+    rows = db.execute(
+        stmt.order_by(GenerationTask.created_at.desc(), GenerationTask.id.desc())
+        .offset((page - 1) * size)
+        .limit(size)
+    ).all()
+    total = db.scalar(count_stmt) or 0
+    return ScriptTaskListResult(
+        records=[serialize_task_list_item(task, book_title) for task, book_title in rows],
+        total=total,
+    )
 
 
 def build_placeholder_generation(book: Book, chapters: list[Chapter], task: GenerationTask) -> dict:

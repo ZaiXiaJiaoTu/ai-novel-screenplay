@@ -196,6 +196,19 @@ export interface ScriptTaskDetail {
   error_message: string | null;
 }
 
+export interface ScriptTaskListItem extends ScriptTaskDetail {
+  book_id: number;
+  book_title: string;
+  script_project_id: number | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface ScriptTaskListResult {
+  records: ScriptTaskListItem[];
+  total: number;
+}
+
 export interface GenerationArtifactListItem {
   artifact_id: number;
   artifact_type: string;
@@ -421,6 +434,15 @@ export async function startScriptTask(taskId: number) {
 
 export async function fetchScriptTask(taskId: number) {
   return unwrap(await apiClient.get<ApiEnvelope<ScriptTaskDetail>>(`/script-tasks/${taskId}`));
+}
+
+export async function fetchScriptTasks(params?: {
+  book_id?: number;
+  status?: string;
+  page?: number;
+  size?: number;
+}) {
+  return unwrap(await apiClient.get<ApiEnvelope<ScriptTaskListResult>>("/script-tasks", { params }));
 }
 
 export async function cancelScriptTask(taskId: number) {

@@ -39,6 +39,62 @@
       </div>
     </section>
 
+    <section class="settings-panel">
+      <div class="task-history-header">
+        <div>
+          <div class="panel-title">任务历史</div>
+          <p class="page-subtitle">查看最近的剧本生成任务，并切换为当前任务继续处理。</p>
+        </div>
+        <el-button :icon="Refresh" :loading="loadingTasks" @click="loadTasks">刷新任务</el-button>
+      </div>
+      <el-table
+        v-loading="loadingTasks"
+        :data="tasks"
+        height="260"
+        empty-text="暂无剧本生成任务"
+        highlight-current-row
+        @row-click="selectTask"
+      >
+        <el-table-column prop="task_id" label="任务" width="90">
+          <template #default="{ row }">#{{ row.task_id }}</template>
+        </el-table-column>
+        <el-table-column prop="book_title" label="作品" min-width="150" show-overflow-tooltip />
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="getTaskStatusType(row.status)">
+              {{ getTaskStatusLabel(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="current_step" label="步骤" min-width="130">
+          <template #default="{ row }">{{ row.current_step || "等待中" }}</template>
+        </el-table-column>
+        <el-table-column label="进度" width="150">
+          <template #default="{ row }">
+            <el-progress :percentage="row.progress" :status="getTaskProgressStatus(row.status)" />
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="创建时间" min-width="180" />
+        <el-table-column label="操作" width="150">
+          <template #default="{ row }">
+            <el-button link type="primary" @click.stop="selectTask(row)">选中</el-button>
+            <el-button link type="primary" @click.stop="openTaskArtifacts(row)">中间成果</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="table-footer">
+        <span class="page-subtitle">共 {{ taskTotal }} 条</span>
+        <el-pagination
+          v-model:current-page="taskPage"
+          v-model:page-size="taskSize"
+          layout="prev, pager, next, sizes"
+          :page-sizes="[10, 20, 50]"
+          :total="taskTotal"
+          @change="loadTasks"
+        />
+      </div>
+    </section>
+
     <div class="script-workspace">
       <section class="settings-panel">
         <div class="panel-title">项目列表</div>
@@ -213,6 +269,7 @@ import {
   type ScriptSegmentDetail,
   type ScriptSegmentListItem,
   type ScriptTaskDetail,
+  type ScriptTaskListItem,
   cancelScriptTask,
   createScriptTask,
   deleteScriptSegment,
@@ -222,6 +279,7 @@ import {
   fetchScriptSegment,
   fetchScriptSegments,
   fetchScriptTask,
+  fetchScriptTasks,
   fetchTaskArtifacts,
   retryScriptTask,
   scriptProjectDownloadUrl,
@@ -235,12 +293,14 @@ const books = ref<BookListItem[]>([]);
 const projects = ref<ScriptProjectListItem[]>([]);
 const segments = ref<ScriptSegmentListItem[]>([]);
 const artifacts = ref<GenerationArtifactListItem[]>([]);
+const tasks = ref<ScriptTaskListItem[]>([]);
 const selectedProject = ref<ScriptProjectListItem | null>(null);
 const currentTask = ref<ScriptTaskDetail | null>(null);
 const segmentDetail = ref<ScriptSegmentDetail | null>(null);
 const selectedArtifact = ref<GenerationArtifactDetail | null>(null);
 const loadingProjects = ref(false);
 const loadingSegments = ref(false);
+const loadingTasks = ref(false);
 const creatingTask = ref(false);
 const savingSegment = ref(false);
 const savingArtifact = ref(false);
@@ -251,6 +311,9 @@ const artifactsVisible = ref(false);
 const artifactDialogVisible = ref(false);
 const segmentTab = ref("yaml");
 const artifactEditContent = ref("");
+const taskPage = ref(1);
+const taskSize = ref(10);
+const taskTotal = ref(0);
 const taskForm = reactive({
   book_id: undefined as number | undefined,
   script_type: "short_drama",
@@ -277,34 +340,42 @@ const taskStatusLabel = computed(() => {
   if (!currentTask.value) {
     return "";
   }
-  return taskStatusLabels[currentTask.value.status] || currentTask.value.status;
+  return getTaskStatusLabel(currentTask.value.status);
 });
 
-const taskStatusType = computed(() => {
-  if (currentTask.value?.status === "completed") {
+function getTaskStatusLabel(status: string) {
+  return taskStatusLabels[status] || status;
+}
+
+function getTaskStatusType(status: string) {
+  if (status === "completed") {
     return "success";
   }
-  if (currentTask.value?.status === "failed") {
+  if (status === "failed") {
     return "danger";
   }
-  if (currentTask.value?.status === "canceled") {
+  if (status === "canceled") {
     return "warning";
   }
   return "info";
-});
+}
 
-const taskProgressStatus = computed(() => {
-  if (currentTask.value?.status === "completed") {
+function getTaskProgressStatus(status: string) {
+  if (status === "completed") {
     return "success";
   }
-  if (currentTask.value?.status === "failed") {
+  if (status === "failed") {
     return "exception";
   }
-  if (currentTask.value?.status === "canceled") {
+  if (status === "canceled") {
     return "warning";
   }
   return undefined;
-});
+}
+
+const taskStatusType = computed(() => getTaskStatusType(currentTask.value?.status || ""));
+
+const taskProgressStatus = computed(() => getTaskProgressStatus(currentTask.value?.status || ""));
 
 const canCancelTask = computed(() => {
   return currentTask.value ? ["pending", "running"].includes(currentTask.value.status) : false;
@@ -331,6 +402,32 @@ async function loadProjects() {
     ElMessage.error("剧本项目加载失败，请检查后端服务和数据库连接");
   } finally {
     loadingProjects.value = false;
+  }
+}
+
+async function loadTasks() {
+  loadingTasks.value = true;
+  try {
+    const result = await fetchScriptTasks({ page: taskPage.value, size: taskSize.value });
+    tasks.value = result.records;
+    taskTotal.value = result.total;
+    if (!currentTask.value && result.records.length > 0) {
+      currentTask.value = await fetchScriptTask(result.records[0].task_id);
+    }
+  } catch {
+    tasks.value = [];
+    taskTotal.value = 0;
+    ElMessage.error("任务历史加载失败");
+  } finally {
+    loadingTasks.value = false;
+  }
+}
+
+async function selectTask(task: ScriptTaskListItem) {
+  try {
+    currentTask.value = await fetchScriptTask(task.task_id);
+  } catch {
+    ElMessage.error("任务详情加载失败");
   }
 }
 
@@ -377,6 +474,7 @@ async function createAndStartTask() {
     currentTask.value = await startScriptTask(created.task_id);
     ElMessage.success("剧本生成任务已完成");
     taskDialogVisible.value = false;
+    await loadTasks();
     await loadProjects();
   } catch {
     ElMessage.error("剧本生成失败，请检查模型配置或后端日志");
@@ -392,6 +490,7 @@ async function refreshTask() {
   taskActionLoading.value = true;
   try {
     currentTask.value = await fetchScriptTask(currentTask.value.task_id);
+    await loadTasks();
   } catch {
     ElMessage.error("任务状态刷新失败");
   } finally {
@@ -410,6 +509,7 @@ async function cancelTask() {
     taskActionLoading.value = true;
     currentTask.value = await cancelScriptTask(currentTask.value.task_id);
     ElMessage.success("任务已取消");
+    await loadTasks();
   } catch {
     ElMessage.info("取消操作已放弃或失败");
   } finally {
@@ -426,6 +526,7 @@ async function retryTask() {
     const pendingTask = await retryScriptTask(currentTask.value.task_id);
     currentTask.value = await startScriptTask(pendingTask.task_id);
     ElMessage.success("任务已重新生成");
+    await loadTasks();
     await loadProjects();
   } catch {
     ElMessage.error("重新生成失败，请检查模型配置或后端日志");
@@ -444,6 +545,11 @@ async function loadArtifacts() {
   } catch {
     ElMessage.error("中间成果加载失败");
   }
+}
+
+async function openTaskArtifacts(task: ScriptTaskListItem) {
+  currentTask.value = await fetchScriptTask(task.task_id);
+  await loadArtifacts();
 }
 
 async function openArtifact(artifact: GenerationArtifactListItem) {
@@ -549,5 +655,6 @@ function downloadProject(projectId: number, format: "yaml" | "txt") {
 
 onMounted(() => {
   void loadProjects();
+  void loadTasks();
 });
 </script>

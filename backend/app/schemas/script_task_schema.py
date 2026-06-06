@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -19,6 +21,19 @@ class ScriptTaskDetail(BaseModel):
     current_step: str | None
     progress: int
     error_message: str | None
+
+
+class ScriptTaskListItem(ScriptTaskDetail):
+    book_id: int
+    book_title: str
+    script_project_id: int | None
+    created_at: datetime
+    finished_at: datetime | None
+
+
+class ScriptTaskListResult(BaseModel):
+    records: list[ScriptTaskListItem]
+    total: int
 
 
 class GenerationArtifactListItem(BaseModel):
