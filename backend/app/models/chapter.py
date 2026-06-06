@@ -19,4 +19,3 @@ class Chapter(TimestampMixin, Base):
     is_deleted: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     book = relationship("Book", back_populates="chapters")
-    summary = relationship("ChapterSummary", back_populates="chapter", uselist=False)

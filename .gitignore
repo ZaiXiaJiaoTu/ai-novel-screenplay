@@ -7,3 +7,4 @@ dist/
 frontend/.vite/
 .env
 .DS_Store
+.runtime-*.log

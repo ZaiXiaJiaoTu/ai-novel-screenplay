@@ -39,7 +39,6 @@ def create_book_from_text(
         word_count=word_count,
         chapter_count=len(chapters),
         preprocess_status="completed",
-        story_profile_status="pending",
     )
     db.add(book)
     db.flush()
