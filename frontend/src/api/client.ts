@@ -221,6 +221,101 @@ export interface ScriptSegmentDetail extends ScriptSegmentListItem {
   plain_text_content: string | null;
 }
 
+export type AdaptationType = "tv" | "short_drama" | "animation" | "audio_drama";
+export type PacingLevel = "fast" | "medium" | "slow";
+export type DensityLevel = "high" | "medium" | "low";
+
+export interface ScriptAdaptationProject {
+  project_id: number;
+  book_id: number;
+  book_title: string;
+  project_name: string;
+  adaptation_type: AdaptationType;
+  episode_duration: number | null;
+  pacing: PacingLevel;
+  scene_frequency: DensityLevel;
+  dialogue_density: DensityLevel;
+  events_per_episode: number;
+  yaml_schema_delta: Record<string, unknown> | null;
+  split_status: string;
+  split_stop_requested: boolean;
+  generation_status: string;
+  generation_stop_requested: boolean;
+  event_count: number;
+  character_count: number;
+  episode_count: number;
+}
+
+export interface ScriptAdaptationProjectList {
+  records: ScriptAdaptationProject[];
+  total: number;
+}
+
+export interface ScriptAdaptationCreatePayload {
+  book_id: number;
+  project_name: string;
+  adaptation_type: AdaptationType;
+  episode_duration: number;
+  pacing: PacingLevel;
+  scene_frequency: DensityLevel;
+  dialogue_density: DensityLevel;
+  events_per_episode: number;
+}
+
+export type ScriptAdaptationConfigPayload = Partial<
+  Omit<ScriptAdaptationCreatePayload, "book_id" | "adaptation_type">
+>;
+
+export interface ScriptWorkflowProgress {
+  project_id: number;
+  chapter_count: number;
+  split_chapter_count: number;
+  batch_count: number;
+  event_count: number;
+  locked_event_count: number;
+  episode_count: number;
+  split_status: string;
+  split_stop_requested: boolean;
+  generation_status: string;
+  generation_stop_requested: boolean;
+}
+
+export interface ScriptEventBatchDetail {
+  batch_id: number;
+  batch_index: number;
+  chapter_start_index: number;
+  chapter_end_index: number;
+  status: string;
+  event_count: number;
+}
+
+export interface ScriptPlotEventDetail {
+  event_id: number;
+  batch_id: number;
+  event_index: number;
+  content: string;
+  source_chapter_start: number;
+  source_chapter_end: number;
+  locked: boolean;
+}
+
+export interface ScriptCharacterDetail {
+  character_id: number;
+  name: string;
+  profile: string;
+  metadata_json: Record<string, unknown> | null;
+}
+
+export interface ScriptEpisodeDetail {
+  episode_id: number;
+  episode_index: number;
+  title: string;
+  event_ids: number[];
+  yaml_content: string | null;
+  plain_text_content: string | null;
+  status: string;
+}
+
 function unwrap<T>(response: AxiosResponse<ApiEnvelope<T>>): T {
   return response.data.data;
 }
@@ -489,4 +584,187 @@ export function scriptSegmentDownloadUrl(segmentId: number, format: "yaml" | "tx
 
 export function scriptProjectDownloadUrl(projectId: number, format: "yaml" | "txt") {
   return `/api/script-projects/${projectId}/download?format=${format}`;
+}
+
+export async function fetchScriptAdaptations(params?: { page?: number; size?: number }) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<ScriptAdaptationProjectList>>("/script-adaptations", {
+      params
+    })
+  );
+}
+
+export async function createScriptAdaptation(payload: ScriptAdaptationCreatePayload) {
+  return unwrap(
+    await apiClient.post<ApiEnvelope<ScriptAdaptationProject>>("/script-adaptations", payload)
+  );
+}
+
+export async function updateScriptAdaptationConfig(
+  projectId: number,
+  payload: ScriptAdaptationConfigPayload
+) {
+  return unwrap(
+    await apiClient.put<ApiEnvelope<ScriptAdaptationProject>>(
+      `/script-adaptations/${projectId}/config`,
+      payload
+    )
+  );
+}
+
+export async function deleteScriptAdaptation(projectId: number) {
+  return unwrap(
+    await apiClient.delete<ApiEnvelope<{ deleted: boolean }>>(`/script-adaptations/${projectId}`)
+  );
+}
+
+export async function fetchScriptAdaptationProgress(projectId: number) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<ScriptWorkflowProgress>>(
+      `/script-adaptations/${projectId}/progress`
+    )
+  );
+}
+
+export async function splitScriptEventsOnce(projectId: number) {
+  return unwrap(
+    await apiClient.post<ApiEnvelope<ScriptWorkflowProgress>>(
+      `/script-adaptations/${projectId}/split/once`,
+      undefined,
+      { timeout: 180000 }
+    )
+  );
+}
+
+export async function splitScriptEventsAll(projectId: number) {
+  return unwrap(
+    await apiClient.post<ApiEnvelope<ScriptWorkflowProgress>>(
+      `/script-adaptations/${projectId}/split/all`,
+      undefined,
+      { timeout: 600000 }
+    )
+  );
+}
+
+export async function stopScriptEventSplit(projectId: number) {
+  return unwrap(
+    await apiClient.post<ApiEnvelope<ScriptWorkflowProgress>>(
+      `/script-adaptations/${projectId}/split/stop`
+    )
+  );
+}
+
+export async function fetchScriptEventBatches(projectId: number) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<ScriptEventBatchDetail[]>>(
+      `/script-adaptations/${projectId}/batches`
+    )
+  );
+}
+
+export async function fetchScriptPlotEvents(projectId: number) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<ScriptPlotEventDetail[]>>(
+      `/script-adaptations/${projectId}/events`
+    )
+  );
+}
+
+export async function updateScriptPlotEvent(eventId: number, payload: { content: string }) {
+  return unwrap(
+    await apiClient.put<ApiEnvelope<ScriptPlotEventDetail>>(
+      `/script-adaptations/events/${eventId}`,
+      payload
+    )
+  );
+}
+
+export async function deleteScriptPlotEvent(eventId: number) {
+  return unwrap(
+    await apiClient.delete<ApiEnvelope<{ deleted: boolean }>>(
+      `/script-adaptations/events/${eventId}`
+    )
+  );
+}
+
+export async function fetchScriptCharacters(projectId: number) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<ScriptCharacterDetail[]>>(
+      `/script-adaptations/${projectId}/characters`
+    )
+  );
+}
+
+export async function updateScriptCharacter(
+  characterId: number,
+  payload: { name?: string; profile?: string; metadata_json?: Record<string, unknown> | null }
+) {
+  return unwrap(
+    await apiClient.put<ApiEnvelope<ScriptCharacterDetail>>(
+      `/script-adaptations/characters/${characterId}`,
+      payload
+    )
+  );
+}
+
+export async function generateScriptEpisodeOnce(
+  projectId: number,
+  payload: { events_per_episode?: number }
+) {
+  return unwrap(
+    await apiClient.post<ApiEnvelope<ScriptEpisodeDetail>>(
+      `/script-adaptations/${projectId}/episodes/once`,
+      payload,
+      { timeout: 180000 }
+    )
+  );
+}
+
+export async function generateScriptEpisodesAll(
+  projectId: number,
+  payload: { events_per_episode?: number }
+) {
+  return unwrap(
+    await apiClient.post<ApiEnvelope<ScriptEpisodeDetail[]>>(
+      `/script-adaptations/${projectId}/episodes/all`,
+      payload,
+      { timeout: 600000 }
+    )
+  );
+}
+
+export async function stopScriptEpisodeGeneration(projectId: number) {
+  return unwrap(
+    await apiClient.post<ApiEnvelope<ScriptWorkflowProgress>>(
+      `/script-adaptations/${projectId}/episodes/stop`
+    )
+  );
+}
+
+export async function fetchScriptEpisodes(projectId: number) {
+  return unwrap(
+    await apiClient.get<ApiEnvelope<ScriptEpisodeDetail[]>>(
+      `/script-adaptations/${projectId}/episodes`
+    )
+  );
+}
+
+export async function updateScriptEpisode(
+  episodeId: number,
+  payload: { title?: string; yaml_content?: string | null; plain_text_content?: string | null }
+) {
+  return unwrap(
+    await apiClient.put<ApiEnvelope<ScriptEpisodeDetail>>(
+      `/script-adaptations/episodes/${episodeId}`,
+      payload
+    )
+  );
+}
+
+export function scriptAdaptationEpisodeDownloadUrl(episodeId: number, format: "yaml" | "txt") {
+  return `/api/script-adaptations/episodes/${episodeId}/download?format=${format}`;
+}
+
+export function scriptAdaptationDownloadUrl(projectId: number, format: "yaml" | "txt") {
+  return `/api/script-adaptations/${projectId}/download?format=${format}`;
 }

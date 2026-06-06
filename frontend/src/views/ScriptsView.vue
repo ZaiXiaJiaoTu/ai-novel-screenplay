@@ -1,663 +1,799 @@
 <template>
   <section class="scripts-page">
-    <div class="page-header settings-header">
+    <div class="page-header books-header">
       <div>
         <h1 class="page-title">剧本书架</h1>
-        <p class="page-subtitle">创建剧本生成任务，查看生成后的项目和片段，并导出 YAML 或 TXT。</p>
+        <p class="page-subtitle">从小说创建改编项目，按剧情事件、人物、分集剧本和导出四个模块推进。</p>
       </div>
-      <div class="settings-actions">
-        <el-button :icon="Refresh" :loading="loadingProjects" @click="loadProjects">刷新书架</el-button>
-        <el-button type="primary" :icon="VideoPlay" @click="openTaskDialog">生成剧本</el-button>
-      </div>
+      <el-button :icon="Refresh" :loading="loadingProjects" @click="reloadAll">刷新</el-button>
     </div>
 
-    <section v-if="currentTask" class="settings-panel task-status-panel">
-      <div>
-        <div class="panel-title">最近任务 #{{ currentTask.task_id }}</div>
-        <div class="task-status-line">
-          <el-tag :type="taskStatusType">{{ taskStatusLabel }}</el-tag>
-          <span>{{ currentTask.current_step || "等待中" }}</span>
+    <div class="script-adaptation-layout">
+      <aside class="bookshelf-sidebar">
+        <div class="bookshelf-sidebar-header">
+          <div>
+            <div class="panel-title">剧本列表</div>
+            <p class="page-subtitle">共 {{ projects.length }} 个项目</p>
+          </div>
+          <el-button type="primary" :icon="Plus" @click="openCreateDialog">剧本改编</el-button>
         </div>
-      </div>
-      <div class="task-progress-block">
-        <el-progress :percentage="currentTask.progress" :status="taskProgressStatus" />
-        <el-alert
-          v-if="currentTask.error_message"
-          type="error"
-          :title="currentTask.error_message"
-          :closable="false"
-          show-icon
-        />
-      </div>
-      <div class="settings-actions">
-        <el-button :icon="Refresh" :loading="taskActionLoading" @click="refreshTask">刷新任务</el-button>
-        <el-button v-if="canCancelTask" :loading="taskActionLoading" @click="cancelTask">取消任务</el-button>
-        <el-button v-if="canRetryTask" type="primary" :loading="taskActionLoading" @click="retryTask">
-          重新生成
-        </el-button>
-        <el-button :icon="Document" @click="loadArtifacts">查看中间成果</el-button>
-      </div>
-    </section>
 
-    <section class="settings-panel">
-      <div class="task-history-header">
-        <div>
-          <div class="panel-title">任务历史</div>
-          <p class="page-subtitle">查看最近的剧本生成任务，并切换为当前任务继续处理。</p>
+        <el-scrollbar class="book-list-scroll" v-loading="loadingProjects">
+          <button
+            v-for="project in projects"
+            :key="project.project_id"
+            class="book-list-item"
+            :class="{ active: selectedProject?.project_id === project.project_id }"
+            type="button"
+            @click="selectProject(project)"
+          >
+            <span class="book-title">{{ project.project_name }}</span>
+            <span class="book-meta">
+              {{ project.book_title }} / {{ typeLabel(project.adaptation_type) }} /
+              {{ project.episode_count }} 集
+            </span>
+            <span class="book-meta">
+              事件 {{ project.event_count }} / 人物 {{ project.character_count }}
+            </span>
+            <span class="script-list-actions">
+              <el-button link type="primary" :icon="Setting" @click.stop="openConfigDialog(project)">
+                参数
+              </el-button>
+              <el-button link type="danger" :icon="Delete" @click.stop="removeProject(project)">
+                删除
+              </el-button>
+            </span>
+          </button>
+          <el-empty v-if="!loadingProjects && projects.length === 0" description="暂无剧本项目" />
+        </el-scrollbar>
+      </aside>
+
+      <main class="chapter-workspace">
+        <div class="chapter-toolbar">
+          <div>
+            <div class="panel-title">
+              {{ selectedProject ? selectedProject.project_name : "改编模块" }}
+            </div>
+            <p class="page-subtitle">
+              {{
+                selectedProject
+                  ? `${typeLabel(selectedProject.adaptation_type)} / ${selectedProject.episode_duration || "-"} 分钟 / ${pacingLabel(selectedProject.pacing)}`
+                  : "请选择左侧剧本项目"
+              }}
+            </p>
+          </div>
+          <el-tag v-if="progress" type="info">
+            已拆分 {{ progress.split_chapter_count }}/{{ progress.chapter_count }} 章
+          </el-tag>
         </div>
-        <el-button :icon="Refresh" :loading="loadingTasks" @click="loadTasks">刷新任务</el-button>
-      </div>
-      <el-table
-        v-loading="loadingTasks"
-        :data="tasks"
-        height="260"
-        empty-text="暂无剧本生成任务"
-        highlight-current-row
-        @row-click="selectTask"
-      >
-        <el-table-column prop="task_id" label="任务" width="90">
-          <template #default="{ row }">#{{ row.task_id }}</template>
-        </el-table-column>
-        <el-table-column prop="book_title" label="作品" min-width="150" show-overflow-tooltip />
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="getTaskStatusType(row.status)">
-              {{ getTaskStatusLabel(row.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="current_step" label="步骤" min-width="130">
-          <template #default="{ row }">{{ row.current_step || "等待中" }}</template>
-        </el-table-column>
-        <el-table-column label="进度" width="150">
-          <template #default="{ row }">
-            <el-progress :percentage="row.progress" :status="getTaskProgressStatus(row.status)" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" min-width="180" />
-        <el-table-column label="操作" width="150">
-          <template #default="{ row }">
-            <el-button link type="primary" @click.stop="selectTask(row)">选中</el-button>
-            <el-button link type="primary" @click.stop="openTaskArtifacts(row)">中间成果</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <div class="table-footer">
-        <span class="page-subtitle">共 {{ taskTotal }} 条</span>
-        <el-pagination
-          v-model:current-page="taskPage"
-          v-model:page-size="taskSize"
-          layout="prev, pager, next, sizes"
-          :page-sizes="[10, 20, 50]"
-          :total="taskTotal"
-          @change="loadTasks"
-        />
-      </div>
-    </section>
 
-    <div class="script-workspace">
-      <section class="settings-panel">
-        <div class="panel-title">项目列表</div>
-        <el-table
-          v-loading="loadingProjects"
-          :data="projects"
-          height="420"
-          highlight-current-row
-          empty-text="暂无剧本项目"
-          @row-click="selectProject"
-        >
-          <el-table-column prop="project_name" label="项目" min-width="180" />
-          <el-table-column prop="book_title" label="作品" min-width="150" />
-          <el-table-column prop="script_type" label="类型" width="110" />
-          <el-table-column prop="segment_count" label="片段" width="80" />
-          <el-table-column label="导出" width="140">
-            <template #default="{ row }">
-              <el-button link type="primary" @click.stop="downloadProject(row.project_id, 'txt')">TXT</el-button>
-              <el-button link type="primary" @click.stop="downloadProject(row.project_id, 'yaml')">YAML</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </section>
+        <el-tabs v-model="activeModule" class="script-module-tabs">
+          <el-tab-pane label="剧情事件拆分" name="events">
+            <section class="module-stack">
+              <div class="module-actions">
+                <el-button
+                  type="primary"
+                  :icon="Scissor"
+                  :disabled="!selectedProject"
+                  :loading="splitting"
+                  @click="splitOnce"
+                >
+                  单次拆分
+                </el-button>
+                <el-button
+                  :icon="DArrowRight"
+                  :disabled="!selectedProject"
+                  :loading="splitting"
+                  @click="splitAll"
+                >
+                  全部拆分
+                </el-button>
+                <el-button
+                  type="warning"
+                  :icon="CircleClose"
+                  :disabled="!selectedProject"
+                  @click="stopSplit"
+                >
+                  安全停止拆分
+                </el-button>
+              </div>
 
-      <section class="settings-panel">
-        <div class="panel-title">片段列表</div>
-        <p class="page-subtitle script-selected-title">
-          {{ selectedProject ? selectedProject.project_name : "请选择剧本项目" }}
-        </p>
-        <el-table
-          v-loading="loadingSegments"
-          :data="segments"
-          height="376"
-          empty-text="暂无剧本片段"
-          @row-click="openSegment"
-        >
-          <el-table-column prop="segment_name" label="片段" min-width="180" />
-          <el-table-column prop="style" label="风格" width="120" />
-          <el-table-column prop="scene_count" label="场景" width="80" />
-          <el-table-column prop="status" label="状态" width="100" />
-          <el-table-column label="操作" width="160">
-            <template #default="{ row }">
-              <el-button link type="primary" @click.stop="openSegment(row)">编辑</el-button>
-              <el-button link type="primary" @click.stop="downloadSegment(row.segment_id, 'yaml')">YAML</el-button>
-              <el-button link type="danger" @click.stop="removeSegment(row)">删除</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </section>
+              <div v-if="progress" class="script-progress-row">
+                <el-progress :percentage="splitPercent" />
+                <span>
+                  {{ progress.batch_count }} 个批次 / {{ progress.event_count }} 个事件
+                </span>
+              </div>
+
+              <el-table :data="batches" empty-text="暂无拆分批次">
+                <el-table-column prop="batch_index" label="批次" width="90" />
+                <el-table-column label="章节范围" width="160">
+                  <template #default="{ row }">
+                    {{ row.chapter_start_index }} - {{ row.chapter_end_index }}
+                  </template>
+                </el-table-column>
+                <el-table-column prop="event_count" label="事件数" width="100" />
+                <el-table-column prop="status" label="状态" width="120" />
+              </el-table>
+
+              <el-table :data="events" empty-text="暂无剧情事件">
+                <el-table-column prop="event_index" label="序号" width="80" />
+                <el-table-column prop="content" label="剧情事件" min-width="360" show-overflow-tooltip />
+                <el-table-column label="来源章节" width="130">
+                  <template #default="{ row }">
+                    {{ row.source_chapter_start }} - {{ row.source_chapter_end }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="状态" width="90">
+                  <template #default="{ row }">
+                    <el-tag :type="row.locked ? 'warning' : 'success'">
+                      {{ row.locked ? "已锁定" : "可编辑" }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="150">
+                  <template #default="{ row }">
+                    <el-button link type="primary" :disabled="row.locked" @click="openEventDialog(row)">
+                      编辑
+                    </el-button>
+                    <el-button link type="danger" :disabled="row.locked" @click="removeEvent(row)">
+                      删除
+                    </el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </section>
+          </el-tab-pane>
+
+          <el-tab-pane label="人物" name="characters">
+            <el-table :data="characters" empty-text="暂无人物档案">
+              <el-table-column prop="name" label="人物" width="180" />
+              <el-table-column prop="profile" label="档案" min-width="420" show-overflow-tooltip />
+              <el-table-column label="操作" width="100">
+                <template #default="{ row }">
+                  <el-button link type="primary" @click="openCharacterDialog(row)">编辑</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+
+          <el-tab-pane label="剧本生成" name="episodes">
+            <div class="episode-workspace">
+              <section class="episode-control-panel">
+                <el-form label-position="top">
+                  <el-form-item label="每集分配剧情事件">
+                    <el-input-number v-model="episodeConfig.events_per_episode" :min="1" :max="100" />
+                  </el-form-item>
+                </el-form>
+                <div class="module-actions vertical">
+                  <el-button
+                    type="primary"
+                    :disabled="!selectedProject"
+                    :loading="generatingEpisode"
+                    @click="generateEpisodeOnce"
+                  >
+                    单集生成
+                  </el-button>
+                  <el-button
+                    :disabled="!selectedProject"
+                    :loading="generatingEpisode"
+                    @click="generateEpisodesAll"
+                  >
+                    全部生成
+                  </el-button>
+                  <el-button type="warning" :disabled="!selectedProject" @click="stopEpisodes">
+                    安全停止生成
+                  </el-button>
+                </div>
+                <el-divider />
+                <el-table :data="episodes" empty-text="暂无分集剧本" height="360" @row-click="selectEpisode">
+                  <el-table-column prop="episode_index" label="集数" width="80" />
+                  <el-table-column prop="title" label="标题" min-width="160" />
+                  <el-table-column label="事件" width="80">
+                    <template #default="{ row }">{{ row.event_ids.length }}</template>
+                  </el-table-column>
+                </el-table>
+              </section>
+
+              <section class="episode-editor-panel">
+                <div class="panel-title">
+                  {{ selectedEpisode ? selectedEpisode.title : "剧本预览" }}
+                </div>
+                <el-tabs v-model="episodePreviewTab">
+                  <el-tab-pane label="YAML" name="yaml">
+                    <el-input
+                      v-model="episodeEdit.yaml_content"
+                      type="textarea"
+                      :rows="18"
+                      :disabled="!selectedEpisode"
+                    />
+                  </el-tab-pane>
+                  <el-tab-pane label="TXT" name="txt">
+                    <el-input
+                      v-model="episodeEdit.plain_text_content"
+                      type="textarea"
+                      :rows="18"
+                      :disabled="!selectedEpisode"
+                    />
+                  </el-tab-pane>
+                </el-tabs>
+                <div class="module-actions">
+                  <el-button
+                    type="primary"
+                    :disabled="!selectedEpisode"
+                    :loading="savingEpisode"
+                    @click="saveEpisode"
+                  >
+                    保存修改
+                  </el-button>
+                </div>
+              </section>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="剧本导出" name="export">
+            <section class="module-stack">
+              <div class="module-actions">
+                <el-select v-model="exportFormat" style="width: 140px">
+                  <el-option label="YAML" value="yaml" />
+                  <el-option label="TXT" value="txt" />
+                </el-select>
+                <el-button
+                  type="primary"
+                  :disabled="!selectedEpisode"
+                  :icon="Download"
+                  @click="downloadEpisode"
+                >
+                  分集导出
+                </el-button>
+                <el-button
+                  :disabled="!selectedProject"
+                  :icon="Download"
+                  @click="downloadAllEpisodes"
+                >
+                  全部导出
+                </el-button>
+              </div>
+              <el-table :data="episodes" empty-text="暂无可导出的剧集">
+                <el-table-column prop="episode_index" label="集数" width="90" />
+                <el-table-column prop="title" label="标题" min-width="220" />
+                <el-table-column prop="status" label="状态" width="100" />
+                <el-table-column label="导出" width="150">
+                  <template #default="{ row }">
+                    <el-button link type="primary" @click="downloadEpisodeById(row.episode_id, 'yaml')">
+                      YAML
+                    </el-button>
+                    <el-button link type="primary" @click="downloadEpisodeById(row.episode_id, 'txt')">
+                      TXT
+                    </el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </section>
+          </el-tab-pane>
+        </el-tabs>
+      </main>
     </div>
 
-    <el-dialog v-model="taskDialogVisible" title="生成剧本" width="720px">
+    <el-dialog v-model="projectDialogVisible" :title="editingProject ? '参数配置' : '剧本改编'" width="720px">
       <el-form label-position="top">
-        <el-form-item label="选择作品">
-          <el-select v-model="taskForm.book_id" filterable placeholder="请选择已导入作品">
+        <el-form-item v-if="!editingProject" label="选择小说">
+          <el-select v-model="projectForm.book_id" filterable>
             <el-option
               v-for="book in books"
               :key="book.book_id"
-              :label="`${book.title}（${book.chapter_count} 章）`"
+              :label="`${book.title} / ${book.chapter_count} 章`"
               :value="book.book_id"
             />
           </el-select>
         </el-form-item>
+        <el-form-item label="剧本名称">
+          <el-input v-model="projectForm.project_name" maxlength="80" show-word-limit />
+        </el-form-item>
         <div class="settings-form-grid">
-          <el-form-item label="剧本类型">
-            <el-select v-model="taskForm.script_type">
+          <el-form-item label="改编类型">
+            <el-select v-model="projectForm.adaptation_type" :disabled="Boolean(editingProject)">
+              <el-option label="电视剧" value="tv" />
               <el-option label="短剧" value="short_drama" />
-              <el-option label="分镜脚本" value="screenplay" />
-              <el-option label="解说脚本" value="narration" />
+              <el-option label="动画" value="animation" />
+              <el-option label="广播剧" value="audio_drama" />
             </el-select>
           </el-form-item>
-          <el-form-item label="风格">
-            <el-input v-model="taskForm.style" placeholder="悬疑、轻喜剧、现实主义" />
+          <el-form-item label="单集时长">
+            <el-input-number v-model="projectForm.episode_duration" :min="1" :max="240" />
           </el-form-item>
-          <el-form-item label="压缩级别">
-            <el-select v-model="taskForm.compression_level">
-              <el-option label="低" value="low" />
-              <el-option label="中" value="medium" />
-              <el-option label="高" value="high" />
+          <el-form-item label="剧情节奏">
+            <el-select v-model="projectForm.pacing">
+              <el-option label="快" value="fast" />
+              <el-option label="适中" value="medium" />
+              <el-option label="慢" value="slow" />
             </el-select>
           </el-form-item>
         </div>
         <div class="settings-form-grid">
-          <el-form-item label="起始章节">
-            <el-input-number v-model="taskForm.start_chapter" :min="1" />
+          <el-form-item label="场景切换频率">
+            <el-select v-model="projectForm.scene_frequency">
+              <el-option label="高" value="high" />
+              <el-option label="中" value="medium" />
+              <el-option label="低" value="low" />
+            </el-select>
           </el-form-item>
-          <el-form-item label="结束章节">
-            <el-input-number v-model="taskForm.end_chapter" :min="1" />
+          <el-form-item label="对话密度">
+            <el-select v-model="projectForm.dialogue_density">
+              <el-option label="高" value="high" />
+              <el-option label="中" value="medium" />
+              <el-option label="低" value="low" />
+            </el-select>
           </el-form-item>
-          <el-form-item label="目标时长（分钟）">
-            <el-input-number v-model="taskForm.target_duration" :min="1" />
+          <el-form-item label="每集剧情事件数">
+            <el-input-number v-model="projectForm.events_per_episode" :min="1" :max="100" />
           </el-form-item>
         </div>
       </el-form>
       <template #footer>
-        <el-button @click="taskDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="creatingTask" @click="createAndStartTask">创建并启动</el-button>
+        <el-button @click="projectDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingProject" @click="saveProject">保存</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="segmentDialogVisible" title="编辑剧本片段" width="920px">
-      <el-tabs v-if="segmentDetail" v-model="segmentTab">
-        <el-tab-pane label="YAML" name="yaml">
-          <el-input v-model="segmentEdit.yaml_content" type="textarea" :rows="18" />
-        </el-tab-pane>
-        <el-tab-pane label="纯文本" name="text">
-          <el-input v-model="segmentEdit.plain_text_content" type="textarea" :rows="18" />
-        </el-tab-pane>
-      </el-tabs>
+    <el-dialog v-model="eventDialogVisible" title="编辑剧情事件" width="680px">
+      <el-input v-model="eventForm.content" type="textarea" :rows="8" />
       <template #footer>
-        <el-button @click="segmentDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="savingSegment" @click="saveSegment">保存</el-button>
+        <el-button @click="eventDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingEvent" @click="saveEvent">保存</el-button>
       </template>
     </el-dialog>
 
-    <el-drawer v-model="artifactsVisible" title="中间成果" size="520px">
-      <el-table :data="artifacts" empty-text="暂无中间成果">
-        <el-table-column prop="artifact_type" label="类型" min-width="160" />
-        <el-table-column label="版本" width="80">
-          <template #default="{ row }">v{{ row.version }}</template>
-        </el-table-column>
-        <el-table-column label="可编辑" width="90">
-          <template #default="{ row }">{{ row.editable ? "是" : "否" }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="90">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="openArtifact(row)">查看</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-drawer>
-
-    <el-dialog v-model="artifactDialogVisible" title="中间成果详情" width="920px">
-      <div v-if="selectedArtifact" class="artifact-editor">
-        <el-descriptions :column="3" border>
-          <el-descriptions-item label="类型">{{ selectedArtifact.artifact_type }}</el-descriptions-item>
-          <el-descriptions-item label="版本">v{{ selectedArtifact.version }}</el-descriptions-item>
-          <el-descriptions-item label="可编辑">{{ selectedArtifact.editable ? "是" : "否" }}</el-descriptions-item>
-        </el-descriptions>
-        <el-input
-          v-model="artifactEditContent"
-          type="textarea"
-          :rows="18"
-          :readonly="!selectedArtifact.editable"
-        />
-      </div>
+    <el-dialog v-model="characterDialogVisible" title="编辑人物档案" width="680px">
+      <el-form label-position="top">
+        <el-form-item label="人物名称">
+          <el-input v-model="characterForm.name" />
+        </el-form-item>
+        <el-form-item label="人物档案">
+          <el-input v-model="characterForm.profile" type="textarea" :rows="10" />
+        </el-form-item>
+      </el-form>
       <template #footer>
-        <el-button @click="artifactDialogVisible = false">关闭</el-button>
-        <el-button
-          v-if="selectedArtifact?.editable"
-          type="primary"
-          :loading="savingArtifact"
-          @click="saveArtifact"
-        >
-          保存
-        </el-button>
+        <el-button @click="characterDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingCharacter" @click="saveCharacter">保存</el-button>
       </template>
     </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { Delete, Document, Refresh, VideoPlay } from "@element-plus/icons-vue";
+import {
+  CircleClose,
+  DArrowRight,
+  Delete,
+  Download,
+  Plus,
+  Refresh,
+  Scissor,
+  Setting
+} from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 
 import {
+  type AdaptationType,
   type BookListItem,
-  type GenerationArtifactDetail,
-  type GenerationArtifactListItem,
-  type ScriptProjectListItem,
-  type ScriptSegmentDetail,
-  type ScriptSegmentListItem,
-  type ScriptTaskDetail,
-  type ScriptTaskListItem,
-  cancelScriptTask,
-  createScriptTask,
-  deleteScriptSegment,
-  fetchArtifact,
+  type DensityLevel,
+  type PacingLevel,
+  type ScriptAdaptationProject,
+  type ScriptCharacterDetail,
+  type ScriptEpisodeDetail,
+  type ScriptEventBatchDetail,
+  type ScriptPlotEventDetail,
+  type ScriptWorkflowProgress,
+  createScriptAdaptation,
+  deleteScriptAdaptation,
+  deleteScriptPlotEvent,
   fetchBooks,
-  fetchScriptProjects,
-  fetchScriptSegment,
-  fetchScriptSegments,
-  fetchScriptTask,
-  fetchScriptTasks,
-  fetchTaskArtifacts,
-  retryScriptTask,
-  scriptProjectDownloadUrl,
-  scriptSegmentDownloadUrl,
-  startScriptTask,
-  updateArtifact,
-  updateScriptSegmentContent
+  fetchScriptAdaptationProgress,
+  fetchScriptAdaptations,
+  fetchScriptCharacters,
+  fetchScriptEpisodes,
+  fetchScriptEventBatches,
+  fetchScriptPlotEvents,
+  generateScriptEpisodeOnce,
+  generateScriptEpisodesAll,
+  scriptAdaptationDownloadUrl,
+  scriptAdaptationEpisodeDownloadUrl,
+  splitScriptEventsAll,
+  splitScriptEventsOnce,
+  stopScriptEpisodeGeneration,
+  stopScriptEventSplit,
+  updateScriptAdaptationConfig,
+  updateScriptCharacter,
+  updateScriptEpisode,
+  updateScriptPlotEvent
 } from "@/api/client";
 
+const projects = ref<ScriptAdaptationProject[]>([]);
 const books = ref<BookListItem[]>([]);
-const projects = ref<ScriptProjectListItem[]>([]);
-const segments = ref<ScriptSegmentListItem[]>([]);
-const artifacts = ref<GenerationArtifactListItem[]>([]);
-const tasks = ref<ScriptTaskListItem[]>([]);
-const selectedProject = ref<ScriptProjectListItem | null>(null);
-const currentTask = ref<ScriptTaskDetail | null>(null);
-const segmentDetail = ref<ScriptSegmentDetail | null>(null);
-const selectedArtifact = ref<GenerationArtifactDetail | null>(null);
+const selectedProject = ref<ScriptAdaptationProject | null>(null);
+const progress = ref<ScriptWorkflowProgress | null>(null);
+const batches = ref<ScriptEventBatchDetail[]>([]);
+const events = ref<ScriptPlotEventDetail[]>([]);
+const characters = ref<ScriptCharacterDetail[]>([]);
+const episodes = ref<ScriptEpisodeDetail[]>([]);
+const selectedEpisode = ref<ScriptEpisodeDetail | null>(null);
+const editingProject = ref<ScriptAdaptationProject | null>(null);
+const editingEvent = ref<ScriptPlotEventDetail | null>(null);
+const editingCharacter = ref<ScriptCharacterDetail | null>(null);
+const activeModule = ref("events");
+const episodePreviewTab = ref("yaml");
+const exportFormat = ref<"yaml" | "txt">("yaml");
 const loadingProjects = ref(false);
-const loadingSegments = ref(false);
-const loadingTasks = ref(false);
-const creatingTask = ref(false);
-const savingSegment = ref(false);
-const savingArtifact = ref(false);
-const taskActionLoading = ref(false);
-const taskDialogVisible = ref(false);
-const segmentDialogVisible = ref(false);
-const artifactsVisible = ref(false);
-const artifactDialogVisible = ref(false);
-const segmentTab = ref("yaml");
-const artifactEditContent = ref("");
-const taskPage = ref(1);
-const taskSize = ref(10);
-const taskTotal = ref(0);
-const taskForm = reactive({
+const savingProject = ref(false);
+const splitting = ref(false);
+const generatingEpisode = ref(false);
+const savingEpisode = ref(false);
+const savingEvent = ref(false);
+const savingCharacter = ref(false);
+const projectDialogVisible = ref(false);
+const eventDialogVisible = ref(false);
+const characterDialogVisible = ref(false);
+
+const projectForm = reactive({
   book_id: undefined as number | undefined,
-  script_type: "short_drama",
-  style: "",
-  compression_level: "medium",
-  start_chapter: 1,
-  end_chapter: 3,
-  target_duration: 5
+  project_name: "",
+  adaptation_type: "short_drama" as AdaptationType,
+  episode_duration: 10,
+  pacing: "medium" as PacingLevel,
+  scene_frequency: "medium" as DensityLevel,
+  dialogue_density: "medium" as DensityLevel,
+  events_per_episode: 10
 });
-const segmentEdit = reactive({
+const episodeConfig = reactive({
+  events_per_episode: 10
+});
+const episodeEdit = reactive({
+  title: "",
   yaml_content: "",
   plain_text_content: ""
 });
+const eventForm = reactive({ content: "" });
+const characterForm = reactive({ name: "", profile: "" });
 
-const taskStatusLabels: Record<string, string> = {
-  pending: "等待中",
-  running: "生成中",
-  completed: "已完成",
-  failed: "失败",
-  canceled: "已取消"
-};
-
-const taskStatusLabel = computed(() => {
-  if (!currentTask.value) {
-    return "";
+const splitPercent = computed(() => {
+  if (!progress.value || progress.value.chapter_count === 0) {
+    return 0;
   }
-  return getTaskStatusLabel(currentTask.value.status);
+  return Math.round((progress.value.split_chapter_count / progress.value.chapter_count) * 100);
 });
 
-function getTaskStatusLabel(status: string) {
-  return taskStatusLabels[status] || status;
+function typeLabel(type: string) {
+  return (
+    {
+      tv: "电视剧",
+      short_drama: "短剧",
+      animation: "动画",
+      audio_drama: "广播剧"
+    }[type] || type
+  );
 }
 
-function getTaskStatusType(status: string) {
-  if (status === "completed") {
-    return "success";
-  }
-  if (status === "failed") {
-    return "danger";
-  }
-  if (status === "canceled") {
-    return "warning";
-  }
-  return "info";
+function pacingLabel(value: string) {
+  return ({ fast: "快", medium: "适中", slow: "慢" }[value] || value);
 }
-
-function getTaskProgressStatus(status: string) {
-  if (status === "completed") {
-    return "success";
-  }
-  if (status === "failed") {
-    return "exception";
-  }
-  if (status === "canceled") {
-    return "warning";
-  }
-  return undefined;
-}
-
-const taskStatusType = computed(() => getTaskStatusType(currentTask.value?.status || ""));
-
-const taskProgressStatus = computed(() => getTaskProgressStatus(currentTask.value?.status || ""));
-
-const canCancelTask = computed(() => {
-  return currentTask.value ? ["pending", "running"].includes(currentTask.value.status) : false;
-});
-
-const canRetryTask = computed(() => currentTask.value?.status === "failed");
 
 async function loadBooks() {
-  try {
-    const result = await fetchBooks();
-    books.value = result.records;
-  } catch {
-    books.value = [];
-  }
+  const result = await fetchBooks();
+  books.value = result.records;
 }
 
 async function loadProjects() {
   loadingProjects.value = true;
   try {
-    const result = await fetchScriptProjects({ page: 1, size: 50 });
+    const result = await fetchScriptAdaptations({ page: 1, size: 100 });
     projects.value = result.records;
+    if (!selectedProject.value && projects.value.length > 0) {
+      await selectProject(projects.value[0]);
+    }
   } catch {
     projects.value = [];
-    ElMessage.error("剧本项目加载失败，请检查后端服务和数据库连接");
+    ElMessage.error("剧本列表加载失败");
   } finally {
     loadingProjects.value = false;
   }
 }
 
-async function loadTasks() {
-  loadingTasks.value = true;
-  try {
-    const result = await fetchScriptTasks({ page: taskPage.value, size: taskSize.value });
-    tasks.value = result.records;
-    taskTotal.value = result.total;
-    if (!currentTask.value && result.records.length > 0) {
-      currentTask.value = await fetchScriptTask(result.records[0].task_id);
-    }
-  } catch {
-    tasks.value = [];
-    taskTotal.value = 0;
-    ElMessage.error("任务历史加载失败");
-  } finally {
-    loadingTasks.value = false;
+async function reloadAll() {
+  await loadProjects();
+  if (selectedProject.value) {
+    await loadProjectData(selectedProject.value.project_id);
   }
 }
 
-async function selectTask(task: ScriptTaskListItem) {
-  try {
-    currentTask.value = await fetchScriptTask(task.task_id);
-  } catch {
-    ElMessage.error("任务详情加载失败");
-  }
-}
-
-async function selectProject(project: ScriptProjectListItem) {
+async function selectProject(project: ScriptAdaptationProject) {
   selectedProject.value = project;
-  loadingSegments.value = true;
-  try {
-    segments.value = await fetchScriptSegments(project.project_id);
-  } catch {
-    segments.value = [];
-    ElMessage.error("剧本片段加载失败");
-  } finally {
-    loadingSegments.value = false;
-  }
+  episodeConfig.events_per_episode = project.events_per_episode;
+  await loadProjectData(project.project_id);
 }
 
-async function openTaskDialog() {
+async function loadProjectData(projectId: number) {
+  const [nextProgress, nextBatches, nextEvents, nextCharacters, nextEpisodes] =
+    await Promise.all([
+      fetchScriptAdaptationProgress(projectId),
+      fetchScriptEventBatches(projectId),
+      fetchScriptPlotEvents(projectId),
+      fetchScriptCharacters(projectId),
+      fetchScriptEpisodes(projectId)
+    ]);
+  progress.value = nextProgress;
+  batches.value = nextBatches;
+  events.value = nextEvents;
+  characters.value = nextCharacters;
+  episodes.value = nextEpisodes;
+  selectedEpisode.value = nextEpisodes[0] ?? null;
+  applyEpisodeEdit(selectedEpisode.value);
+}
+
+async function openCreateDialog() {
   await loadBooks();
-  taskDialogVisible.value = true;
+  editingProject.value = null;
+  Object.assign(projectForm, {
+    book_id: books.value[0]?.book_id,
+    project_name: "",
+    adaptation_type: "short_drama",
+    episode_duration: 10,
+    pacing: "medium",
+    scene_frequency: "medium",
+    dialogue_density: "medium",
+    events_per_episode: 10
+  });
+  projectDialogVisible.value = true;
 }
 
-async function createAndStartTask() {
-  if (!taskForm.book_id) {
-    ElMessage.warning("请选择作品");
+function openConfigDialog(project: ScriptAdaptationProject) {
+  editingProject.value = project;
+  Object.assign(projectForm, {
+    book_id: project.book_id,
+    project_name: project.project_name,
+    adaptation_type: project.adaptation_type,
+    episode_duration: project.episode_duration || 10,
+    pacing: project.pacing,
+    scene_frequency: project.scene_frequency,
+    dialogue_density: project.dialogue_density,
+    events_per_episode: project.events_per_episode
+  });
+  projectDialogVisible.value = true;
+}
+
+async function saveProject() {
+  if (!projectForm.project_name.trim()) {
+    ElMessage.warning("请填写剧本名称");
     return;
   }
-  creatingTask.value = true;
+  savingProject.value = true;
   try {
-    const created = await createScriptTask({
-      book_id: taskForm.book_id,
-      project_id: null,
-      adapt_scope: {
-        type: "chapter_range",
-        start_chapter: taskForm.start_chapter,
-        end_chapter: taskForm.end_chapter
-      },
-      generation_config: {
-        script_type: taskForm.script_type,
-        style: taskForm.style,
-        compression_level: taskForm.compression_level,
-        target_duration: taskForm.target_duration
+    if (editingProject.value) {
+      await updateScriptAdaptationConfig(editingProject.value.project_id, {
+        project_name: projectForm.project_name.trim(),
+        episode_duration: projectForm.episode_duration,
+        pacing: projectForm.pacing,
+        scene_frequency: projectForm.scene_frequency,
+        dialogue_density: projectForm.dialogue_density,
+        events_per_episode: projectForm.events_per_episode
+      });
+      ElMessage.success("参数已保存");
+    } else {
+      if (!projectForm.book_id) {
+        ElMessage.warning("请选择小说");
+        return;
       }
-    });
-    currentTask.value = await startScriptTask(created.task_id);
-    ElMessage.success("剧本生成任务已完成");
-    taskDialogVisible.value = false;
-    try {
-      await Promise.all([loadTasks(), loadProjects()]);
-    } catch {
-      ElMessage.warning("剧本已生成，列表刷新失败，请手动刷新页面");
+      await createScriptAdaptation({
+        book_id: projectForm.book_id,
+        project_name: projectForm.project_name.trim(),
+        adaptation_type: projectForm.adaptation_type,
+        episode_duration: projectForm.episode_duration,
+        pacing: projectForm.pacing,
+        scene_frequency: projectForm.scene_frequency,
+        dialogue_density: projectForm.dialogue_density,
+        events_per_episode: projectForm.events_per_episode
+      });
+      ElMessage.success("剧本项目已创建");
     }
-  } catch {
-    ElMessage.error("剧本生成失败，请检查模型配置或后端日志");
-  } finally {
-    creatingTask.value = false;
-  }
-}
-
-async function refreshTask() {
-  if (!currentTask.value) {
-    return;
-  }
-  taskActionLoading.value = true;
-  try {
-    currentTask.value = await fetchScriptTask(currentTask.value.task_id);
-    await loadTasks();
-  } catch {
-    ElMessage.error("任务状态刷新失败");
-  } finally {
-    taskActionLoading.value = false;
-  }
-}
-
-async function cancelTask() {
-  if (!currentTask.value) {
-    return;
-  }
-  try {
-    await ElMessageBox.confirm("确定取消当前剧本生成任务？", "取消任务", {
-      type: "warning"
-    });
-    taskActionLoading.value = true;
-    currentTask.value = await cancelScriptTask(currentTask.value.task_id);
-    ElMessage.success("任务已取消");
-    await loadTasks();
-  } catch {
-    ElMessage.info("取消操作已放弃或失败");
-  } finally {
-    taskActionLoading.value = false;
-  }
-}
-
-async function retryTask() {
-  if (!currentTask.value) {
-    return;
-  }
-  taskActionLoading.value = true;
-  try {
-    const pendingTask = await retryScriptTask(currentTask.value.task_id);
-    currentTask.value = await startScriptTask(pendingTask.task_id);
-    ElMessage.success("任务已重新生成");
-    await loadTasks();
+    projectDialogVisible.value = false;
     await loadProjects();
   } catch {
-    ElMessage.error("重新生成失败，请检查模型配置或后端日志");
+    ElMessage.error("剧本项目保存失败");
   } finally {
-    taskActionLoading.value = false;
+    savingProject.value = false;
   }
 }
 
-async function loadArtifacts() {
-  if (!currentTask.value) {
-    return;
+async function removeProject(project: ScriptAdaptationProject) {
+  await ElMessageBox.confirm(`确定删除「${project.project_name}」以及全部改编数据吗？`, "删除剧本", {
+    type: "warning"
+  });
+  await deleteScriptAdaptation(project.project_id);
+  ElMessage.success("剧本已删除");
+  if (selectedProject.value?.project_id === project.project_id) {
+    selectedProject.value = null;
+    progress.value = null;
+    batches.value = [];
+    events.value = [];
+    characters.value = [];
+    episodes.value = [];
   }
-  try {
-    artifacts.value = await fetchTaskArtifacts(currentTask.value.task_id);
-    artifactsVisible.value = true;
-  } catch {
-    ElMessage.error("中间成果加载失败");
-  }
+  await loadProjects();
 }
 
-async function openTaskArtifacts(task: ScriptTaskListItem) {
-  currentTask.value = await fetchScriptTask(task.task_id);
-  await loadArtifacts();
-}
-
-async function openArtifact(artifact: GenerationArtifactListItem) {
+async function splitOnce() {
+  if (!selectedProject.value) return;
+  splitting.value = true;
   try {
-    selectedArtifact.value = await fetchArtifact(artifact.artifact_id);
-    artifactEditContent.value = JSON.stringify(selectedArtifact.value.content ?? {}, null, 2);
-    artifactDialogVisible.value = true;
+    progress.value = await splitScriptEventsOnce(selectedProject.value.project_id);
+    await reloadSelectedData();
+    ElMessage.success("已完成一次剧情拆分");
   } catch {
-    ElMessage.error("中间成果详情加载失败");
-  }
-}
-
-async function saveArtifact() {
-  if (!selectedArtifact.value) {
-    return;
-  }
-  let parsedContent: Record<string, unknown> | unknown[];
-  try {
-    const parsed = JSON.parse(artifactEditContent.value) as unknown;
-    if (parsed === null || (typeof parsed !== "object" && !Array.isArray(parsed))) {
-      ElMessage.warning("中间成果内容必须是 JSON 对象或数组");
-      return;
-    }
-    parsedContent = parsed as Record<string, unknown> | unknown[];
-  } catch {
-    ElMessage.error("JSON 格式不正确，请检查后再保存");
-    return;
-  }
-
-  savingArtifact.value = true;
-  try {
-    selectedArtifact.value = await updateArtifact(selectedArtifact.value.artifact_id, {
-      content: parsedContent
-    });
-    artifactEditContent.value = JSON.stringify(selectedArtifact.value.content ?? {}, null, 2);
-    ElMessage.success("中间成果已保存");
-    if (currentTask.value) {
-      artifacts.value = await fetchTaskArtifacts(currentTask.value.task_id);
-    }
-  } catch {
-    ElMessage.error("中间成果保存失败");
+    ElMessage.error("剧情拆分失败");
   } finally {
-    savingArtifact.value = false;
+    splitting.value = false;
   }
 }
 
-async function openSegment(segment: ScriptSegmentListItem) {
+async function splitAll() {
+  if (!selectedProject.value) return;
+  splitting.value = true;
   try {
-    segmentDetail.value = await fetchScriptSegment(segment.segment_id);
-    segmentEdit.yaml_content = segmentDetail.value.yaml_content || "";
-    segmentEdit.plain_text_content = segmentDetail.value.plain_text_content || "";
-    segmentDialogVisible.value = true;
+    progress.value = await splitScriptEventsAll(selectedProject.value.project_id);
+    await reloadSelectedData();
+    ElMessage.success("批量拆分已完成");
   } catch {
-    ElMessage.error("剧本片段详情加载失败");
-  }
-}
-
-async function saveSegment() {
-  if (!segmentDetail.value) {
-    return;
-  }
-  savingSegment.value = true;
-  try {
-    const saved = await updateScriptSegmentContent(segmentDetail.value.segment_id, {
-      yaml_content: segmentEdit.yaml_content,
-      plain_text_content: segmentEdit.plain_text_content
-    });
-    segmentDetail.value = saved;
-    ElMessage.success("片段已保存");
-    segmentDialogVisible.value = false;
-    if (selectedProject.value) {
-      await selectProject(selectedProject.value);
-    }
-  } catch {
-    ElMessage.error("片段保存失败");
+    ElMessage.error("批量拆分失败");
   } finally {
-    savingSegment.value = false;
+    splitting.value = false;
   }
 }
 
-async function removeSegment(segment: ScriptSegmentListItem) {
+async function stopSplit() {
+  if (!selectedProject.value) return;
+  progress.value = await stopScriptEventSplit(selectedProject.value.project_id);
+  ElMessage.success("已请求安全停止拆分");
+}
+
+async function reloadSelectedData() {
+  if (!selectedProject.value) return;
+  await loadProjectData(selectedProject.value.project_id);
+  const result = await fetchScriptAdaptations({ page: 1, size: 100 });
+  projects.value = result.records;
+  selectedProject.value =
+    projects.value.find((item) => item.project_id === selectedProject.value?.project_id) ??
+    selectedProject.value;
+}
+
+function openEventDialog(event: ScriptPlotEventDetail) {
+  editingEvent.value = event;
+  eventForm.content = event.content;
+  eventDialogVisible.value = true;
+}
+
+async function saveEvent() {
+  if (!editingEvent.value) return;
+  savingEvent.value = true;
   try {
-    await ElMessageBox.confirm(`确定删除 ${segment.segment_name}？`, "删除片段", {
-      type: "warning"
+    await updateScriptPlotEvent(editingEvent.value.event_id, {
+      content: eventForm.content.trim()
     });
-    await deleteScriptSegment(segment.segment_id);
-    ElMessage.success("片段已删除");
-    if (selectedProject.value) {
-      await selectProject(selectedProject.value);
-    }
-  } catch {
-    ElMessage.info("删除操作已取消或失败");
+    eventDialogVisible.value = false;
+    await reloadSelectedData();
+  } finally {
+    savingEvent.value = false;
   }
 }
 
-function downloadSegment(segmentId: number, format: "yaml" | "txt") {
-  window.open(scriptSegmentDownloadUrl(segmentId, format), "_blank");
+async function removeEvent(event: ScriptPlotEventDetail) {
+  await ElMessageBox.confirm("确定删除这个剧情事件吗？", "删除剧情事件", { type: "warning" });
+  await deleteScriptPlotEvent(event.event_id);
+  await reloadSelectedData();
 }
 
-function downloadProject(projectId: number, format: "yaml" | "txt") {
-  window.open(scriptProjectDownloadUrl(projectId, format), "_blank");
+function openCharacterDialog(character: ScriptCharacterDetail) {
+  editingCharacter.value = character;
+  characterForm.name = character.name;
+  characterForm.profile = character.profile;
+  characterDialogVisible.value = true;
+}
+
+async function saveCharacter() {
+  if (!editingCharacter.value) return;
+  savingCharacter.value = true;
+  try {
+    await updateScriptCharacter(editingCharacter.value.character_id, {
+      name: characterForm.name.trim(),
+      profile: characterForm.profile
+    });
+    characterDialogVisible.value = false;
+    await reloadSelectedData();
+  } finally {
+    savingCharacter.value = false;
+  }
+}
+
+async function generateEpisodeOnce() {
+  if (!selectedProject.value) return;
+  generatingEpisode.value = true;
+  try {
+    await generateScriptEpisodeOnce(selectedProject.value.project_id, {
+      events_per_episode: episodeConfig.events_per_episode
+    });
+    await reloadSelectedData();
+    ElMessage.success("单集剧本已生成");
+  } catch {
+    ElMessage.error("单集生成失败，可能是可用剧情事件不足");
+  } finally {
+    generatingEpisode.value = false;
+  }
+}
+
+async function generateEpisodesAll() {
+  if (!selectedProject.value) return;
+  generatingEpisode.value = true;
+  try {
+    await generateScriptEpisodesAll(selectedProject.value.project_id, {
+      events_per_episode: episodeConfig.events_per_episode
+    });
+    await reloadSelectedData();
+    ElMessage.success("批量生成已完成");
+  } catch {
+    ElMessage.error("批量生成失败");
+  } finally {
+    generatingEpisode.value = false;
+  }
+}
+
+async function stopEpisodes() {
+  if (!selectedProject.value) return;
+  progress.value = await stopScriptEpisodeGeneration(selectedProject.value.project_id);
+  ElMessage.success("已请求安全停止生成");
+}
+
+function selectEpisode(episode: ScriptEpisodeDetail) {
+  selectedEpisode.value = episode;
+  applyEpisodeEdit(episode);
+}
+
+function applyEpisodeEdit(episode: ScriptEpisodeDetail | null) {
+  episodeEdit.title = episode?.title || "";
+  episodeEdit.yaml_content = episode?.yaml_content || "";
+  episodeEdit.plain_text_content = episode?.plain_text_content || "";
+}
+
+async function saveEpisode() {
+  if (!selectedEpisode.value) return;
+  savingEpisode.value = true;
+  try {
+    selectedEpisode.value = await updateScriptEpisode(selectedEpisode.value.episode_id, {
+      title: episodeEdit.title,
+      yaml_content: episodeEdit.yaml_content,
+      plain_text_content: episodeEdit.plain_text_content
+    });
+    await reloadSelectedData();
+    ElMessage.success("剧本已保存");
+  } finally {
+    savingEpisode.value = false;
+  }
+}
+
+function downloadEpisode() {
+  if (!selectedEpisode.value) return;
+  downloadEpisodeById(selectedEpisode.value.episode_id, exportFormat.value);
+}
+
+function downloadEpisodeById(episodeId: number, format: "yaml" | "txt") {
+  window.open(scriptAdaptationEpisodeDownloadUrl(episodeId, format), "_blank");
+}
+
+function downloadAllEpisodes() {
+  if (!selectedProject.value) return;
+  window.open(scriptAdaptationDownloadUrl(selectedProject.value.project_id, exportFormat.value), "_blank");
 }
 
 onMounted(() => {
   void loadProjects();
-  void loadTasks();
 });
 </script>
