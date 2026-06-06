@@ -7,10 +7,9 @@ from app.services.llm_log_service import serialize_log_detail, serialize_log_ite
 def test_serialize_log_item_omits_summaries():
     log = SimpleNamespace(
         id=1,
-        task_id=2,
         llm_config_id=3,
         prompt_template_id=4,
-        task_type="script_yaml_generation",
+        task_type="script_episode_generation",
         status="success",
         input_tokens=10,
         output_tokens=20,
@@ -31,10 +30,9 @@ def test_serialize_log_item_omits_summaries():
 def test_serialize_log_detail_includes_summaries():
     log = SimpleNamespace(
         id=1,
-        task_id=2,
         llm_config_id=3,
         prompt_template_id=4,
-        task_type="script_yaml_generation",
+        task_type="script_episode_generation",
         status="failed",
         input_tokens=None,
         output_tokens=None,

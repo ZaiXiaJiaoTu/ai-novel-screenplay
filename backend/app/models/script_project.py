@@ -34,4 +34,3 @@ class ScriptProject(SoftDeleteMixin, TimestampMixin, Base):
 
     user = relationship("User", back_populates="script_projects")
     book = relationship("Book", back_populates="script_projects")
-    segments = relationship("ScriptSegment", back_populates="project")

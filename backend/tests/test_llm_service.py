@@ -78,7 +78,7 @@ def test_call_llm_for_task_records_success_log():
     try:
         result = call_llm_for_task(
             db,
-            task_type="script_yaml_generation",
+            task_type="script_episode_generation",
             variables={"title": "长夜来信"},
             model_factory=lambda _config: FakeModel(),
         )

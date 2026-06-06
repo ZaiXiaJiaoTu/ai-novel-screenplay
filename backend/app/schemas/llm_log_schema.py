@@ -5,7 +5,6 @@ from pydantic import BaseModel
 
 class LlmCallLogListItem(BaseModel):
     log_id: int
-    task_id: int | None
     llm_config_id: int | None
     prompt_template_id: int | None
     task_type: str

@@ -89,7 +89,6 @@ export interface LlmConfigTestResult {
 
 export interface LlmCallLogListItem {
   log_id: number;
-  task_id: number | null;
   llm_config_id: number | null;
   prompt_template_id: number | null;
   task_type: string;
@@ -142,83 +141,6 @@ export interface PromptTemplateVersionDetail {
   user_prompt_template: string;
   output_format: string;
   variables: string[] | null;
-}
-
-export interface ScriptTaskCreatePayload {
-  book_id: number;
-  project_id?: number | null;
-  adapt_scope: Record<string, unknown>;
-  generation_config: Record<string, unknown>;
-}
-
-export interface ScriptTaskCreateResult {
-  task_id: number;
-  status: string;
-}
-
-export interface ScriptTaskDetail {
-  task_id: number;
-  status: string;
-  current_step: string | null;
-  progress: number;
-  error_message: string | null;
-}
-
-export interface ScriptTaskListItem extends ScriptTaskDetail {
-  book_id: number;
-  book_title: string;
-  script_project_id: number | null;
-  created_at: string;
-  finished_at: string | null;
-}
-
-export interface ScriptTaskListResult {
-  records: ScriptTaskListItem[];
-  total: number;
-}
-
-export interface GenerationArtifactListItem {
-  artifact_id: number;
-  artifact_type: string;
-  version: number;
-  editable: boolean;
-}
-
-export interface GenerationArtifactDetail extends GenerationArtifactListItem {
-  task_id: number;
-  content: Record<string, unknown> | unknown[] | null;
-}
-
-export interface ScriptProjectListItem {
-  project_id: number;
-  project_name: string;
-  book_title: string;
-  script_type: string | null;
-  default_style: string | null;
-  segment_count: number;
-}
-
-export interface ScriptProjectListResult {
-  records: ScriptProjectListItem[];
-  total: number;
-}
-
-export interface ScriptSegmentListItem {
-  segment_id: number;
-  segment_name: string;
-  style: string | null;
-  compression_level: string | null;
-  target_duration: number | null;
-  scene_count: number;
-  status: string;
-}
-
-export interface ScriptSegmentDetail extends ScriptSegmentListItem {
-  project_id: number;
-  book_id: number;
-  adapt_scope: Record<string, unknown> | null;
-  yaml_content: string | null;
-  plain_text_content: string | null;
 }
 
 export type AdaptationType = "tv" | "short_drama" | "animation" | "audio_drama";
@@ -477,113 +399,6 @@ export async function rollbackPromptTemplate(templateId: number, versionId: numb
       `/prompt-templates/${templateId}/rollback/${versionId}`
     )
   );
-}
-
-export async function createScriptTask(payload: ScriptTaskCreatePayload) {
-  return unwrap(await apiClient.post<ApiEnvelope<ScriptTaskCreateResult>>("/script-tasks", payload));
-}
-
-export async function startScriptTask(taskId: number) {
-  return unwrap(
-    await apiClient.post<ApiEnvelope<ScriptTaskDetail>>(`/script-tasks/${taskId}/start`, undefined, {
-      timeout: 180000
-    })
-  );
-}
-
-export async function fetchScriptTask(taskId: number) {
-  return unwrap(await apiClient.get<ApiEnvelope<ScriptTaskDetail>>(`/script-tasks/${taskId}`));
-}
-
-export async function fetchScriptTasks(params?: {
-  book_id?: number;
-  status?: string;
-  page?: number;
-  size?: number;
-}) {
-  return unwrap(await apiClient.get<ApiEnvelope<ScriptTaskListResult>>("/script-tasks", { params }));
-}
-
-export async function cancelScriptTask(taskId: number) {
-  return unwrap(await apiClient.post<ApiEnvelope<ScriptTaskDetail>>(`/script-tasks/${taskId}/cancel`));
-}
-
-export async function retryScriptTask(taskId: number) {
-  return unwrap(await apiClient.post<ApiEnvelope<ScriptTaskDetail>>(`/script-tasks/${taskId}/retry`));
-}
-
-export async function fetchTaskArtifacts(taskId: number) {
-  return unwrap(
-    await apiClient.get<ApiEnvelope<GenerationArtifactListItem[]>>(
-      `/script-tasks/${taskId}/artifacts`
-    )
-  );
-}
-
-export async function fetchArtifact(artifactId: number) {
-  return unwrap(
-    await apiClient.get<ApiEnvelope<GenerationArtifactDetail>>(`/artifacts/${artifactId}`)
-  );
-}
-
-export async function updateArtifact(
-  artifactId: number,
-  payload: { content: Record<string, unknown> | unknown[] }
-) {
-  return unwrap(
-    await apiClient.put<ApiEnvelope<GenerationArtifactDetail>>(`/artifacts/${artifactId}`, payload)
-  );
-}
-
-export async function fetchScriptProjects(params?: {
-  keyword?: string;
-  script_type?: string;
-  page?: number;
-  size?: number;
-}) {
-  return unwrap(
-    await apiClient.get<ApiEnvelope<ScriptProjectListResult>>("/script-projects", { params })
-  );
-}
-
-export async function fetchScriptSegments(projectId: number) {
-  return unwrap(
-    await apiClient.get<ApiEnvelope<ScriptSegmentListItem[]>>(
-      `/script-projects/${projectId}/segments`
-    )
-  );
-}
-
-export async function fetchScriptSegment(segmentId: number) {
-  return unwrap(
-    await apiClient.get<ApiEnvelope<ScriptSegmentDetail>>(`/script-segments/${segmentId}`)
-  );
-}
-
-export async function updateScriptSegmentContent(
-  segmentId: number,
-  payload: { yaml_content?: string | null; plain_text_content?: string | null }
-) {
-  return unwrap(
-    await apiClient.put<ApiEnvelope<ScriptSegmentDetail>>(
-      `/script-segments/${segmentId}/content`,
-      payload
-    )
-  );
-}
-
-export async function deleteScriptSegment(segmentId: number) {
-  return unwrap(
-    await apiClient.delete<ApiEnvelope<{ deleted: boolean }>>(`/script-segments/${segmentId}`)
-  );
-}
-
-export function scriptSegmentDownloadUrl(segmentId: number, format: "yaml" | "txt") {
-  return `/api/script-segments/${segmentId}/download?format=${format}`;
-}
-
-export function scriptProjectDownloadUrl(projectId: number, format: "yaml" | "txt") {
-  return `/api/script-projects/${projectId}/download?format=${format}`;
 }
 
 export async function fetchScriptAdaptations(params?: { page?: number; size?: number }) {

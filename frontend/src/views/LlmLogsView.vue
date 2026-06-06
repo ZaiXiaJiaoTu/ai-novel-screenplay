@@ -39,7 +39,6 @@
         </el-table-column>
         <el-table-column prop="latency_ms" label="耗时(ms)" width="110" />
         <el-table-column prop="total_tokens" label="Tokens" width="110" />
-        <el-table-column prop="task_id" label="任务ID" width="100" />
         <el-table-column prop="llm_config_id" label="配置ID" width="100" />
         <el-table-column prop="created_at" label="时间" min-width="180" />
       </el-table>
@@ -69,7 +68,6 @@
           <el-descriptions-item label="日志 ID">{{ selectedLog.log_id }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ selectedLog.status }}</el-descriptions-item>
           <el-descriptions-item label="任务类型">{{ selectedLog.task_type }}</el-descriptions-item>
-          <el-descriptions-item label="任务 ID">{{ selectedLog.task_id || "-" }}</el-descriptions-item>
           <el-descriptions-item label="模型配置">{{ selectedLog.llm_config_id || "-" }}</el-descriptions-item>
           <el-descriptions-item label="提示词模板">{{ selectedLog.prompt_template_id || "-" }}</el-descriptions-item>
         </el-descriptions>
@@ -103,10 +101,8 @@ import {
 } from "@/api/client";
 
 const taskOptions = [
-  "style_strategy_generation",
-  "scene_plan_generation",
-  "script_yaml_generation",
-  "yaml_repair"
+  "plot_event_split_generation",
+  "script_episode_generation"
 ];
 
 const logs = ref<LlmCallLogListItem[]>([]);

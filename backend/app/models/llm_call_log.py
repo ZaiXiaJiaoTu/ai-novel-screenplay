@@ -9,9 +9,6 @@ class LlmCallLog(CreatedAtMixin, Base):
     __tablename__ = "llm_call_logs"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    task_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("generation_tasks.id"), nullable=True, index=True
-    )
     llm_config_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("llm_configs.id"), nullable=True
     )

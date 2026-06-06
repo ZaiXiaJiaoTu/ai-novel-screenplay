@@ -14,7 +14,6 @@ from app.schemas.llm_log_schema import (
 def serialize_log_item(log: LlmCallLog) -> LlmCallLogListItem:
     return LlmCallLogListItem(
         log_id=log.id,
-        task_id=log.task_id,
         llm_config_id=log.llm_config_id,
         prompt_template_id=log.prompt_template_id,
         task_type=log.task_type,
