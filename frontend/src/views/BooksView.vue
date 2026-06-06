@@ -21,20 +21,30 @@
         </div>
 
         <el-scrollbar class="book-list-scroll" v-loading="loadingBooks">
-          <button
+          <div
             v-for="book in books"
             :key="book.book_id"
             class="book-list-item"
             :class="{ active: selectedBook?.book_id === book.book_id }"
-            type="button"
             @click="selectBook(book)"
           >
-            <span class="book-title">{{ book.title }}</span>
-            <span class="book-meta">
-              {{ formatNovelType(book.novel_type) }} / {{ book.chapter_count }} 章 /
-              {{ book.word_count }} 字
-            </span>
-          </button>
+            <div class="book-list-main">
+              <span class="book-title">{{ book.title }}</span>
+              <span class="book-meta">
+                {{ formatNovelType(book.novel_type) }} / {{ book.chapter_count }} 章 /
+                {{ book.word_count }} 字
+              </span>
+            </div>
+            <el-button
+              link
+              type="danger"
+              :icon="Delete"
+              :loading="deletingBookId === book.book_id"
+              @click.stop="removeBook(book)"
+            >
+              删除小说
+            </el-button>
+          </div>
           <el-empty v-if="!loadingBooks && books.length === 0" description="暂无作品" />
         </el-scrollbar>
       </aside>
@@ -181,6 +191,7 @@ import {
   type ChapterListItem,
   createBookFromText,
   createChapter,
+  deleteBook,
   deleteChapter,
   fetchBookChapters,
   fetchBooks,
@@ -198,6 +209,7 @@ const loadingBooks = ref(false);
 const loadingChapters = ref(false);
 const creatingBook = ref(false);
 const savingChapter = ref(false);
+const deletingBookId = ref<number | null>(null);
 const uploadVisible = ref(false);
 const chapterDialogVisible = ref(false);
 const activeUploadTab = ref("text");
@@ -412,6 +424,37 @@ async function removeChapter(chapter: ChapterListItem) {
     await loadBooks();
   } catch {
     ElMessage.error("章节删除失败");
+  }
+}
+
+async function removeBook(book: BookListItem) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除「${book.title}」吗？删除后这本小说的章节和相关剧本改编数据也会被清理。`,
+      "删除小说",
+      {
+        type: "warning",
+        confirmButtonText: "删除",
+        cancelButtonText: "取消"
+      }
+    );
+  } catch {
+    return;
+  }
+
+  deletingBookId.value = book.book_id;
+  try {
+    await deleteBook(book.book_id);
+    ElMessage.success("小说已删除");
+    if (selectedBook.value?.book_id === book.book_id) {
+      selectedBook.value = null;
+      chapters.value = [];
+    }
+    await loadBooks();
+  } catch {
+    ElMessage.error("小说删除失败");
+  } finally {
+    deletingBookId.value = null;
   }
 }
 

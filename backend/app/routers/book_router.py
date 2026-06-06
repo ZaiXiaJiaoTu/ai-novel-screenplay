@@ -6,6 +6,7 @@ from app.core.response import success
 from app.schemas.book_schema import BookTextCreate
 from app.services.book_service import (
     create_book_from_text,
+    delete_book,
     get_book_detail,
     list_book_chapters,
     list_books,
@@ -67,6 +68,14 @@ def get_books(
 @router.get("/{book_id}")
 def get_book(book_id: int, db: Session = Depends(get_db)):
     result = get_book_detail(db, book_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="作品不存在")
+    return success(result.model_dump())
+
+
+@router.delete("/{book_id}")
+def remove_book(book_id: int, db: Session = Depends(get_db)):
+    result = delete_book(db, book_id)
     if result is None:
         raise HTTPException(status_code=404, detail="作品不存在")
     return success(result.model_dump())
