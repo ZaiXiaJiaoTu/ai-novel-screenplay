@@ -105,11 +105,11 @@
                 </span>
               </div>
 
-              <el-table :data="batchesWithEvents" empty-text="暂无拆分批次">
+              <el-table class="batch-table" :data="batchesWithEvents" empty-text="暂无拆分批次">
                 <el-table-column type="expand">
                   <template #default="{ row }">
                     <div class="batch-events-panel">
-                      <el-table :data="row.events" empty-text="本批次暂无剧情事件">
+                      <el-table class="batch-events-table" :data="row.events" empty-text="本批次暂无剧情事件">
                         <el-table-column prop="event_index" label="序号" width="80" />
                         <el-table-column prop="content" label="剧情事件" min-width="360" show-overflow-tooltip />
                         <el-table-column label="来源章节" width="130">

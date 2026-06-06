@@ -9,6 +9,7 @@ from app.services.script_adaptation_service import (
     normalize_fact_content,
     parse_json_payload,
     parse_yaml_payload,
+    serialize_character,
 )
 
 
@@ -93,7 +94,7 @@ def test_episode_payload_rejects_off_topic_external_ip():
     ) is False
 
 
-def test_episode_source_events_are_episode_local_numbers():
+def test_episode_source_events_use_global_plot_event_numbers():
     events = [
         SimpleNamespace(id=101, event_index=17),
         SimpleNamespace(id=102, event_index=18),
@@ -110,12 +111,25 @@ def test_episode_source_events_are_episode_local_numbers():
 
     result = normalize_episode_source_events(payload, events)
 
-    assert result["script"]["scenes"][0]["source_events"] == [1]
-    assert result["script"]["scenes"][1]["source_events"] == [2]
-    assert result["script"]["scenes"][2]["source_events"] == [2]
+    assert result["script"]["scenes"][0]["source_events"] == [17]
+    assert result["script"]["scenes"][1]["source_events"] == [18]
+    assert result["script"]["scenes"][2]["source_events"] == [18]
 
 
 def test_fact_normalization_removes_punctuation_for_deduping():
     assert normalize_fact_content("唐三之母，十万年蓝银皇。") == normalize_fact_content(
         "唐三之母 十万年蓝银皇"
     )
+
+
+def test_serialized_character_prefers_consolidated_profile():
+    character = SimpleNamespace(
+        id=1,
+        name="唐三",
+        profile="1. 碎片化特征",
+        metadata_json={"consolidated_profile": "唐三，坚韧谨慎，重视亲情。"},
+    )
+
+    result = serialize_character(character)
+
+    assert result.profile == "唐三，坚韧谨慎，重视亲情。"

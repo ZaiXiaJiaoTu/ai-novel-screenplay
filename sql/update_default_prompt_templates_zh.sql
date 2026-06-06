@@ -41,8 +41,9 @@ YAML Schema 差分：{yaml_schema_delta}
 3. 不得写哈利波特、霍格沃茨、魔法学院等原文未出现的设定；也不得改写成其他作品。
 4. metadata 中必须包含 source_book_title，值必须等于小说名称。
 5. scenes 中每个场景包含 scene_id、scene_title、source_events、location、time、characters、action、dialogue、transition。
-6. dialogue 数组每项包含 speaker、line。
-7. 按改编类型、单集时长、剧情节奏、场景切换频率、对话密度控制输出。',
+6. source_events 必须填写剧情事件拆分模块中的全剧本事件序号 event_index，不要按本集重新从 1 编号。
+7. dialogue 数组每项包含 speaker、line。
+8. 按改编类型、单集时长、剧情节奏、场景切换频率、对话密度控制输出。',
     output_format = 'yaml',
     variables = '["book_title", "adaptation_config", "events", "characters", "chapters", "yaml_schema_delta"]'::jsonb,
     version = version + 1,
