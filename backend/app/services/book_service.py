@@ -117,7 +117,6 @@ def get_book_detail(db: Session, book_id: int) -> BookDetail | None:
         chapter_count=book.chapter_count,
         word_count=book.word_count,
         preprocess_status=book.preprocess_status,
-        story_profile_status=book.story_profile_status,
     )
 
 

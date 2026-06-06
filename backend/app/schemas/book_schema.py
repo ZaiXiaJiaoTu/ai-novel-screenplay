@@ -33,7 +33,6 @@ class BookDetail(BaseModel):
     chapter_count: int
     word_count: int
     preprocess_status: str
-    story_profile_status: str
 
 
 class ChapterListItem(BaseModel):
