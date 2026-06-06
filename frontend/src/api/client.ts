@@ -234,6 +234,7 @@ export interface ScriptEpisodeDetail {
   title: string;
   event_ids: number[];
   yaml_content: string | null;
+  yaml_payload: Record<string, unknown> | null;
   plain_text_content: string | null;
   status: string;
 }
@@ -340,6 +341,12 @@ export async function fetchLlmCallLogs(params?: {
 export async function fetchLlmCallLog(logId: number) {
   return unwrap(
     await apiClient.get<ApiEnvelope<LlmCallLogDetail>>(`/llm-call-logs/${logId}`)
+  );
+}
+
+export async function clearLlmCallLogs() {
+  return unwrap(
+    await apiClient.delete<ApiEnvelope<{ deleted_count: number }>>("/llm-call-logs")
   );
 }
 
@@ -566,7 +573,12 @@ export async function fetchScriptEpisodes(projectId: number) {
 
 export async function updateScriptEpisode(
   episodeId: number,
-  payload: { title?: string; yaml_content?: string | null; plain_text_content?: string | null }
+  payload: {
+    title?: string;
+    yaml_content?: string | null;
+    yaml_payload?: Record<string, unknown> | null;
+    plain_text_content?: string | null;
+  }
 ) {
   return unwrap(
     await apiClient.put<ApiEnvelope<ScriptEpisodeDetail>>(

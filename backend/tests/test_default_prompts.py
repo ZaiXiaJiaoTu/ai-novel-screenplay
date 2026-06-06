@@ -22,4 +22,15 @@ def test_default_script_episode_prompt_requires_yaml_only():
     )
 
     assert script_episode_prompt["output_format"] == "yaml"
-    assert "Return YAML only" in script_episode_prompt["system_prompt"]
+    assert "只返回合法 YAML" in script_episode_prompt["system_prompt"]
+    assert "禁止引入原文没有出现" in script_episode_prompt["system_prompt"]
+
+
+def test_default_plot_event_prompt_is_chinese():
+    plot_prompt = next(
+        item
+        for item in DEFAULT_PROMPT_TEMPLATES
+        if item["task_type"] == "plot_event_split_generation"
+    )
+
+    assert "中文小说改编剧本" in plot_prompt["system_prompt"]

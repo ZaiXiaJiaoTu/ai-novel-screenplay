@@ -16,7 +16,12 @@
       <div class="template-filters">
         <el-input v-model="filters.keyword" clearable placeholder="按模板名称搜索" @change="loadTemplates" />
         <el-select v-model="filters.task_type" clearable placeholder="任务类型" @change="loadTemplates">
-          <el-option v-for="task in taskOptions" :key="task" :label="task" :value="task" />
+          <el-option
+            v-for="task in taskOptions"
+            :key="task.value"
+            :label="task.label"
+            :value="task.value"
+          />
         </el-select>
         <el-select v-model="filters.enabled" clearable placeholder="启用状态" @change="loadTemplates">
           <el-option label="启用" :value="true" />
@@ -26,7 +31,9 @@
 
       <el-table v-loading="loading" :data="templates" empty-text="暂无提示词模板">
         <el-table-column prop="template_name" label="模板名称" min-width="190" />
-        <el-table-column prop="task_type" label="任务类型" min-width="210" show-overflow-tooltip />
+        <el-table-column label="任务类型" min-width="210" show-overflow-tooltip>
+          <template #default="{ row }">{{ taskLabel(row.task_type) }}</template>
+        </el-table-column>
         <el-table-column prop="output_format" label="格式" width="90" />
         <el-table-column label="版本" width="90">
           <template #default="{ row }">v{{ row.version }}</template>
@@ -130,8 +137,8 @@ import {
 } from "@/api/client";
 
 const taskOptions = [
-  "plot_event_split_generation",
-  "script_episode_generation"
+  { label: "剧情事件拆分", value: "plot_event_split_generation" },
+  { label: "单集剧本生成", value: "script_episode_generation" }
 ];
 
 const templates = ref<PromptTemplateDetail[]>([]);
@@ -170,6 +177,10 @@ function parseVariables() {
     .map((item) => item.trim())
     .filter(Boolean);
   return values.length ? values : null;
+}
+
+function taskLabel(taskType: string) {
+  return taskOptions.find((item) => item.value === taskType)?.label || taskType;
 }
 
 function resetForm() {

@@ -5,7 +5,11 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.response import success
-from app.services.llm_log_service import get_llm_call_log, list_llm_call_logs
+from app.services.llm_log_service import (
+    clear_llm_call_logs,
+    get_llm_call_log,
+    list_llm_call_logs,
+)
 
 router = APIRouter(prefix="/api/llm-call-logs", tags=["llm-call-logs"])
 
@@ -31,6 +35,11 @@ def get_logs(
             size=size,
         ).model_dump()
     )
+
+
+@router.delete("")
+def delete_logs(db: Session = Depends(get_db)):
+    return success({"deleted_count": clear_llm_call_logs(db)})
 
 
 @router.get("/{log_id}")

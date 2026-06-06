@@ -1,0 +1,72 @@
+BEGIN;
+
+UPDATE prompt_templates
+SET
+    system_prompt = '你是中文小说改编剧本的剧情整理助手。必须只依据用户提供的小说章节内容输出，禁止引入原文没有出现的人物、地点、世界观、作品设定或外部 IP。只返回合法 JSON，不要返回 Markdown 代码块或解释文字。',
+    user_prompt_template = '小说名称：{book_title}
+改编参数：{adaptation_config}
+本批章节：{chapters}
+输出契约：{output_contract}
+
+任务：
+1. 将本批章节拆成若干剧情事件，剧情事件必须简洁、准确，使用中文。
+2. 识别或补充主要人物档案，人物必须来自本批章节。
+3. 不得写哈利波特、霍格沃茨、魔法学院等原文未出现的设定；也不得改写成其他作品。
+
+返回 JSON 字段：
+- events：按剧情顺序排列的数组，每项包含 content、source_chapter_start、source_chapter_end。
+- characters：按重要程度排列的数组，每项包含 name、profile。',
+    output_format = 'json',
+    variables = '["book_title", "adaptation_config", "chapters", "output_contract"]'::jsonb,
+    version = version + 1,
+    updated_at = NOW()
+WHERE task_type = 'plot_event_split_generation'
+  AND is_deleted = FALSE;
+
+UPDATE prompt_templates
+SET
+    system_prompt = '你是中文剧本改编编剧。必须只依据用户提供的剧情事件、人物档案和原文章节生成一集剧本，禁止引入原文没有出现的人物、地点、世界观、作品设定或外部 IP。只返回合法 YAML，不要返回 Markdown 代码块或解释文字。',
+    user_prompt_template = '小说名称：{book_title}
+改编参数：{adaptation_config}
+本集使用的剧情事件：{events}
+人物档案：{characters}
+对应原文章节：{chapters}
+YAML Schema 差分：{yaml_schema_delta}
+
+要求：
+1. 生成且只生成一集剧本，必须使用中文。
+2. 只能使用本集剧情事件、人物档案和对应原文章节中的信息。
+3. 不得写哈利波特、霍格沃茨、魔法学院等原文未出现的设定；也不得改写成其他作品。
+4. metadata 中必须包含 source_book_title，值必须等于小说名称。
+5. scenes 中每个场景包含 scene_id、scene_title、source_events、location、time、characters、action、dialogue、transition。
+6. dialogue 数组每项包含 speaker、line。
+7. 按改编类型、单集时长、剧情节奏、场景切换频率、对话密度控制输出。',
+    output_format = 'yaml',
+    variables = '["book_title", "adaptation_config", "events", "characters", "chapters", "yaml_schema_delta"]'::jsonb,
+    version = version + 1,
+    updated_at = NOW()
+WHERE task_type = 'script_episode_generation'
+  AND is_deleted = FALSE;
+
+INSERT INTO prompt_template_versions (
+    template_id,
+    version,
+    system_prompt,
+    user_prompt_template,
+    output_format,
+    variables,
+    created_at
+)
+SELECT
+    id,
+    version,
+    system_prompt,
+    user_prompt_template,
+    output_format,
+    variables,
+    NOW()
+FROM prompt_templates
+WHERE task_type IN ('plot_event_split_generation', 'script_episode_generation')
+  AND is_deleted = FALSE;
+
+COMMIT;
