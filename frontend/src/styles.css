@@ -254,6 +254,60 @@ body {
   gap: 18px;
 }
 
+.script-adaptation-layout {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 18px;
+  min-height: calc(100vh - 150px);
+}
+
+.script-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.script-module-tabs {
+  margin-top: 14px;
+}
+
+.module-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.module-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.module-actions.vertical {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.script-progress-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+}
+
+.episode-workspace {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.episode-control-panel,
+.episode-editor-panel {
+  min-width: 0;
+}
+
 .task-status-panel {
   display: grid;
   grid-template-columns: minmax(180px, 280px) minmax(220px, 1fr) auto;
@@ -379,7 +433,13 @@ body {
   }
 
   .script-workspace,
+  .script-adaptation-layout,
   .task-status-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .episode-workspace,
+  .script-progress-row {
     grid-template-columns: 1fr;
   }
 
