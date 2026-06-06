@@ -5,6 +5,7 @@ from app.services.script_adaptation_service import (
     build_episode_text_from_yaml,
     episode_payload_matches_source,
     get_yaml_schema_delta,
+    normalize_episode_metadata,
     normalize_episode_source_events,
     normalize_fact_content,
     parse_json_payload,
@@ -114,6 +115,77 @@ def test_episode_source_events_use_global_plot_event_numbers():
     assert result["script"]["scenes"][0]["source_events"] == [17]
     assert result["script"]["scenes"][1]["source_events"] == [18]
     assert result["script"]["scenes"][2]["source_events"] == [18]
+
+
+def test_episode_metadata_is_normalized_to_project_config():
+    project = SimpleNamespace(
+        script_type="animation",
+        default_target_duration=24,
+        pacing="medium",
+        scene_frequency="medium",
+        dialogue_density="medium",
+        yaml_schema_delta={"metadata": {"format": "animation_episode"}},
+    )
+    events = [SimpleNamespace(id=1, event_index=17, content="唐三前往诺丁城，开始新的修行。")]
+    payload = {
+        "script": {
+            "metadata": {
+                "title": "斗罗大陆 第6集：启程·诺丁城",
+                "episode_number": 99,
+                "source_book_title": "错误书名",
+                "script_type": "old",
+                "target_duration": 10,
+            },
+            "scenes": [{"scene_title": "启程·诺丁城"}],
+        }
+    }
+
+    result = normalize_episode_metadata(
+        payload,
+        project,
+        episode_number=6,
+        book_title="斗罗大陆",
+        events=events,
+    )
+
+    assert result["script"]["metadata"] == {
+        "format": "animation_episode",
+        "title": "启程·诺丁城",
+        "episode_number": 6,
+        "source_book_title": "斗罗大陆",
+        "adaptation_type": "animation",
+        "episode_duration": 24,
+        "pacing": "medium",
+        "scene_frequency": "medium",
+        "dialogue_density": "medium",
+    }
+
+
+def test_episode_metadata_title_falls_back_to_scene_title():
+    project = SimpleNamespace(
+        script_type="animation",
+        default_target_duration=24,
+        pacing="medium",
+        scene_frequency="medium",
+        dialogue_density="medium",
+        yaml_schema_delta={"metadata": {"format": "animation_episode"}},
+    )
+    payload = {
+        "script": {
+            "metadata": {"title": "斗罗大陆 第1集"},
+            "scenes": [{"scene_title": "废武魂与先天满魂力"}],
+        }
+    }
+
+    result = normalize_episode_metadata(
+        payload,
+        project,
+        episode_number=1,
+        book_title="斗罗大陆",
+        events=[],
+    )
+
+    assert result["script"]["metadata"]["title"] == "废武魂与先天满魂力"
 
 
 def test_fact_normalization_removes_punctuation_for_deduping():

@@ -228,9 +228,16 @@
                         <el-form-item label="来源小说">
                           <el-input v-model="episodeForm.metadata.source_book_title" disabled />
                         </el-form-item>
+                        <el-form-item label="集数">
+                          <el-input-number
+                            v-model="episodeForm.metadata.episode_number"
+                            :min="1"
+                            :disabled="!selectedEpisode"
+                          />
+                        </el-form-item>
                         <el-form-item label="目标时长">
                           <el-input-number
-                            v-model="episodeForm.metadata.target_duration"
+                            v-model="episodeForm.metadata.episode_duration"
                             :min="1"
                             :max="240"
                             :disabled="!selectedEpisode"
@@ -570,10 +577,15 @@ type EpisodeSceneForm = {
 };
 const episodeForm = reactive({
   metadata: {
+    format: "",
     title: "",
+    episode_number: null as number | null,
     source_book_title: "",
-    script_type: "",
-    target_duration: null as number | null
+    adaptation_type: "",
+    episode_duration: null as number | null,
+    pacing: "",
+    scene_frequency: "",
+    dialogue_density: ""
   },
   scenes: [] as EpisodeSceneForm[]
 });
@@ -1018,13 +1030,21 @@ function nextLocalId(prefix: string) {
 function applyEpisodeForm(payload: Record<string, unknown> | null) {
   const script = recordOf(payload?.script);
   const metadata = recordOf(script.metadata);
+  episodeForm.metadata.format = String(metadata.format || "");
   episodeForm.metadata.title = String(metadata.title || "");
+  episodeForm.metadata.episode_number =
+    typeof metadata.episode_number === "number"
+      ? metadata.episode_number
+      : selectedEpisode.value?.episode_index || null;
   episodeForm.metadata.source_book_title = String(metadata.source_book_title || selectedProject.value?.book_title || "");
-  episodeForm.metadata.script_type = String(metadata.script_type || selectedProject.value?.adaptation_type || "");
-  episodeForm.metadata.target_duration =
-    typeof metadata.target_duration === "number"
-      ? metadata.target_duration
+  episodeForm.metadata.adaptation_type = String(metadata.adaptation_type || selectedProject.value?.adaptation_type || "");
+  episodeForm.metadata.episode_duration =
+    typeof metadata.episode_duration === "number"
+      ? metadata.episode_duration
       : selectedProject.value?.episode_duration || null;
+  episodeForm.metadata.pacing = String(metadata.pacing || selectedProject.value?.pacing || "");
+  episodeForm.metadata.scene_frequency = String(metadata.scene_frequency || selectedProject.value?.scene_frequency || "");
+  episodeForm.metadata.dialogue_density = String(metadata.dialogue_density || selectedProject.value?.dialogue_density || "");
   episodeForm.scenes.splice(
     0,
     episodeForm.scenes.length,
@@ -1065,11 +1085,15 @@ function buildEpisodePayloadFromForm(): Record<string, unknown> {
       ...existingScript,
       metadata: {
         ...existingMetadata,
-        episode_index: selectedEpisode.value?.episode_index,
+        format: episodeForm.metadata.format || existingMetadata.format,
         title: episodeForm.metadata.title || episodeEdit.title,
+        episode_number: episodeForm.metadata.episode_number || selectedEpisode.value?.episode_index,
         source_book_title: episodeForm.metadata.source_book_title || selectedProject.value?.book_title,
-        script_type: episodeForm.metadata.script_type || selectedProject.value?.adaptation_type,
-        target_duration: episodeForm.metadata.target_duration || selectedProject.value?.episode_duration
+        adaptation_type: episodeForm.metadata.adaptation_type || selectedProject.value?.adaptation_type,
+        episode_duration: episodeForm.metadata.episode_duration || selectedProject.value?.episode_duration,
+        pacing: episodeForm.metadata.pacing || selectedProject.value?.pacing,
+        scene_frequency: episodeForm.metadata.scene_frequency || selectedProject.value?.scene_frequency,
+        dialogue_density: episodeForm.metadata.dialogue_density || selectedProject.value?.dialogue_density
       },
       scenes: episodeForm.scenes.map((scene) => ({
         scene_id: scene.scene_id,
