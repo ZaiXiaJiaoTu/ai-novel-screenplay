@@ -3,6 +3,7 @@
 AI Novel Screenplay 是一个面向中文小说的 AI 剧本改编系统。用户可以上传小说文本，自动切分章节，再通过大模型完成剧情事件拆分、人物档案整理、分集剧本生成、剧本修复、编辑预览和导出。
 
 本发布版本不包含任何演示数据、用户数据、小说内容或大模型 API Key。首次运行后，用户需要自行配置大模型 API、上传小说并生成剧本。
+demo演示视频https://www.bilibili.com/video/BV1GQE86RE5d/?spm_id_from=333.1387.homepage.video_card.click&vd_source=5bd8b2a24076ed2acc8b98477028d714
 
 ## 技术栈
 
