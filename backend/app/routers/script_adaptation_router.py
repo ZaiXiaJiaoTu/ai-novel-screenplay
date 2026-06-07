@@ -28,6 +28,7 @@ from app.services.script_adaptation_service import (
     get_events,
     get_progress,
     list_adaptation_projects,
+    repair_episode,
     start_generate_all_episodes,
     start_split_all_batches,
     split_one_batch,
@@ -230,6 +231,17 @@ def put_episode(
     episode_id: int, payload: ScriptEpisodeUpdate, db: Session = Depends(get_db)
 ):
     result = update_episode(db, episode_id, payload)
+    if result is None:
+        raise HTTPException(status_code=404, detail="episode not found")
+    return success(result.model_dump())
+
+
+@router.post("/episodes/{episode_id}/repair")
+def post_episode_repair(episode_id: int, db: Session = Depends(get_db)):
+    try:
+        result = repair_episode(db, episode_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="episode not found")
     return success(result.model_dump())

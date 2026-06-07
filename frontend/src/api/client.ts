@@ -604,6 +604,16 @@ export async function updateScriptEpisode(
   );
 }
 
+export async function repairScriptEpisode(episodeId: number) {
+  return unwrap(
+    await apiClient.post<ApiEnvelope<ScriptEpisodeDetail>>(
+      `/script-adaptations/episodes/${episodeId}/repair`,
+      undefined,
+      { timeout: 180000 }
+    )
+  );
+}
+
 export function scriptAdaptationEpisodeDownloadUrl(episodeId: number, format: "yaml" | "txt") {
   return `/api/script-adaptations/episodes/${episodeId}/download?format=${format}`;
 }
