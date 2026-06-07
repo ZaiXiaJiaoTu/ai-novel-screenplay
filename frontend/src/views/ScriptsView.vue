@@ -319,6 +319,14 @@
                 </el-tabs>
                 <div class="module-actions">
                   <el-button
+                    :icon="MagicStick"
+                    :disabled="!selectedEpisode"
+                    :loading="repairingEpisode"
+                    @click="repairEpisode"
+                  >
+                    修复剧集
+                  </el-button>
+                  <el-button
                     type="primary"
                     :disabled="!selectedEpisode"
                     :loading="savingEpisode"
@@ -467,6 +475,7 @@ import {
   DArrowRight,
   Delete,
   Download,
+  MagicStick,
   Plus,
   Refresh,
   Scissor,
@@ -499,6 +508,7 @@ import {
   fetchScriptPlotEvents,
   generateScriptEpisodeOnce,
   generateScriptEpisodesAll,
+  repairScriptEpisode,
   scriptAdaptationDownloadUrl,
   scriptAdaptationEpisodeDownloadUrl,
   splitScriptEventsAll,
@@ -531,6 +541,7 @@ const loadingProjects = ref(false);
 const savingProject = ref(false);
 const splitting = ref(false);
 const generatingEpisode = ref(false);
+const repairingEpisode = ref(false);
 const consolidatingCharacters = ref(false);
 const savingEpisode = ref(false);
 const savingEvent = ref(false);
@@ -659,6 +670,7 @@ async function selectProject(project: ScriptAdaptationProject) {
 }
 
 async function loadProjectData(projectId: number) {
+  const previousEpisodeId = selectedEpisode.value?.episode_id;
   const [nextProgress, nextBatches, nextEvents, nextCharacters, nextEpisodes] =
     await Promise.all([
       fetchScriptAdaptationProgress(projectId),
@@ -672,8 +684,15 @@ async function loadProjectData(projectId: number) {
   events.value = nextEvents;
   characters.value = nextCharacters;
   episodes.value = nextEpisodes;
-  selectedEpisode.value = nextEpisodes[0] ?? null;
-  applyEpisodeEdit(selectedEpisode.value);
+  const nextSelectedEpisode =
+    (previousEpisodeId
+      ? nextEpisodes.find((episode) => episode.episode_id === previousEpisodeId)
+      : null) ?? nextEpisodes[0] ?? null;
+  const selectionChanged = nextSelectedEpisode?.episode_id !== previousEpisodeId;
+  selectedEpisode.value = nextSelectedEpisode;
+  if (selectionChanged || (!previousEpisodeId && nextSelectedEpisode)) {
+    applyEpisodeEdit(nextSelectedEpisode);
+  }
   syncWorkflowPolling();
 }
 
@@ -988,6 +1007,26 @@ async function saveEpisode() {
   }
 }
 
+async function repairEpisode() {
+  if (!selectedEpisode.value) return;
+  repairingEpisode.value = true;
+  try {
+    selectedEpisode.value = await repairScriptEpisode(selectedEpisode.value.episode_id);
+    const index = episodes.value.findIndex(
+      (episode) => episode.episode_id === selectedEpisode.value?.episode_id
+    );
+    if (index >= 0) {
+      episodes.value.splice(index, 1, selectedEpisode.value);
+    }
+    applyEpisodeEdit(selectedEpisode.value);
+    ElMessage.success("剧集已修复");
+  } catch {
+    ElMessage.error("剧集修复失败，请查看调用日志");
+  } finally {
+    repairingEpisode.value = false;
+  }
+}
+
 function recordOf(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -1027,7 +1066,8 @@ function nextLocalId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function applyEpisodeForm(payload: Record<string, unknown> | null) {
+function applyEpisodeForm(payload: Record<string, unknown> | null, preserveOpenScenes = false) {
+  const previousOpenSceneNames = preserveOpenScenes ? new Set(openSceneNames.value) : new Set<string>();
   const script = recordOf(payload?.script);
   const metadata = recordOf(script.metadata);
   episodeForm.metadata.format = String(metadata.format || "");
@@ -1054,7 +1094,7 @@ function applyEpisodeForm(payload: Record<string, unknown> | null) {
         scene.action ?? scene.actions ?? scene.action_lines ?? scene.description ?? scene.summary;
       const dialogueValue = scene.dialogue ?? scene.dialogues ?? scene.lines;
       return {
-        local_id: nextLocalId("scene"),
+        local_id: `scene-${String(scene.scene_id || index + 1)}-${index}`,
         scene_id: String(scene.scene_id || index + 1),
         scene_title: String(scene.scene_title || ""),
         source_events: arrayOf(scene.source_events),
@@ -1066,7 +1106,7 @@ function applyEpisodeForm(payload: Record<string, unknown> | null) {
         dialogue: arrayOf(dialogueValue).map((dialogue) => {
           const row = recordOf(dialogue);
           return {
-            local_id: nextLocalId("dialogue"),
+            local_id: `dialogue-${index}-${String(row.speaker || "")}-${String(row.line || "").slice(0, 12)}`,
             speaker: String(row.speaker || ""),
             line: String(row.line || "")
           };
@@ -1074,7 +1114,9 @@ function applyEpisodeForm(payload: Record<string, unknown> | null) {
       };
     })
   );
-  openSceneNames.value = [];
+  openSceneNames.value = episodeForm.scenes
+    .map((scene) => scene.local_id)
+    .filter((localId) => previousOpenSceneNames.has(localId));
 }
 
 function buildEpisodePayloadFromForm(): Record<string, unknown> {

@@ -798,9 +798,11 @@ def split_one_batch(
 
     try:
         if project.split_stop_requested:
-            project.split_status = "stopped"
             if clear_stop_on_finish:
+                project.split_status = "stopped"
                 project.split_stop_requested = False
+            else:
+                project.split_status = "running"
             db.commit()
             return get_progress(db, project_id)
 
@@ -859,9 +861,14 @@ def split_one_batch(
                     )
                 )
         merge_characters(db, project.id, payload["characters"], batch.id)
-        project.split_status = "stopped" if project.split_stop_requested else "idle"
-        if project.split_stop_requested and clear_stop_on_finish:
-            project.split_stop_requested = False
+        if project.split_stop_requested:
+            if clear_stop_on_finish:
+                project.split_status = "stopped"
+                project.split_stop_requested = False
+            else:
+                project.split_status = "running"
+        else:
+            project.split_status = "idle"
         db.commit()
         return get_progress(db, project_id)
     except Exception:
@@ -910,6 +917,8 @@ def start_split_all_batches(db: Session, project_id: int) -> ScriptWorkflowProgr
     if row is None:
         return None
     project, _book_title = row
+    if project.split_status == "running":
+        return get_progress(db, project_id)
     project.split_stop_requested = False
     project.split_status = "running"
     db.commit()
@@ -923,6 +932,8 @@ def stop_split(db: Session, project_id: int) -> ScriptWorkflowProgress | None:
         return None
     project, _ = row
     project.split_stop_requested = True
+    if project.split_status != "running":
+        project.split_status = "stopped"
     db.commit()
     return get_progress(db, project_id)
 
@@ -1485,9 +1496,11 @@ def generate_one_episode(
     db.commit()
 
     if project.generation_stop_requested:
-        project.generation_status = "stopped"
         if clear_stop_on_finish:
+            project.generation_status = "stopped"
             project.generation_stop_requested = False
+        else:
+            project.generation_status = "running"
         db.commit()
         raise ValueError("已请求停止生成")
 
@@ -1631,11 +1644,14 @@ def generate_one_episode(
     db.add(episode)
     for event in events:
         event.locked = True
-    project.generation_status = (
-        "stopped" if project.generation_stop_requested else "idle"
-    )
-    if project.generation_stop_requested and clear_stop_on_finish:
-        project.generation_stop_requested = False
+    if project.generation_stop_requested:
+        if clear_stop_on_finish:
+            project.generation_status = "stopped"
+            project.generation_stop_requested = False
+        else:
+            project.generation_status = "running"
+    else:
+        project.generation_status = "idle"
     db.commit()
     db.refresh(episode)
     return serialize_episode(episode)
@@ -1678,6 +1694,8 @@ def start_generate_all_episodes(
     if row is None:
         return None
     project, _ = row
+    if project.generation_status == "running":
+        return get_progress(db, project_id)
     project.generation_stop_requested = False
     project.generation_status = "running"
     db.commit()
@@ -1695,6 +1713,8 @@ def stop_episode_generation(db: Session, project_id: int) -> ScriptWorkflowProgr
         return None
     project, _ = row
     project.generation_stop_requested = True
+    if project.generation_status != "running":
+        project.generation_status = "stopped"
     db.commit()
     return get_progress(db, project_id)
 
@@ -1750,6 +1770,128 @@ def update_episode(
             episode.yaml_content = data["yaml_content"]
     episode.plain_text_content = build_episode_text_from_yaml(episode.yaml_content)
     episode.status = "draft"
+    db.commit()
+    db.refresh(episode)
+    return serialize_episode(episode)
+
+
+def repair_episode(db: Session, episode_id: int) -> ScriptEpisodeDetail | None:
+    row = db.execute(
+        select(ScriptEpisode, ScriptProject, Book.title)
+        .join(ScriptProject, ScriptProject.id == ScriptEpisode.project_id)
+        .join(Book, Book.id == ScriptProject.book_id)
+        .where(ScriptEpisode.id == episode_id, ScriptEpisode.is_deleted.is_(False))
+    ).first()
+    if row is None:
+        return None
+    episode, project, book_title = row
+    event_ids = [int(event_id) for event_id in (episode.event_ids or [])]
+    events_by_id = {
+        event.id: event
+        for event in db.scalars(
+            select(ScriptPlotEvent).where(
+                ScriptPlotEvent.project_id == project.id,
+                ScriptPlotEvent.id.in_(event_ids),
+                ScriptPlotEvent.is_deleted.is_(False),
+            )
+        )
+    }
+    events = [events_by_id[event_id] for event_id in event_ids if event_id in events_by_id]
+    if not events:
+        raise ValueError("当前剧集没有可用于修复的剧情事件")
+
+    raw_output = episode.yaml_content or ""
+    parsed = parse_episode_yaml_content(raw_output)
+    if parsed is None:
+        validation_issues = [
+            ValidationIssue(
+                code="YAML_PARSE_ERROR",
+                message="原始输出无法解析为YAML，请检查缩进、冒号、列表结构、引号和非法附加文本",
+                path=None,
+            )
+        ]
+    else:
+        parsed = normalize_episode_metadata(
+            parsed,
+            project,
+            episode_number=episode.episode_index,
+            book_title=book_title,
+            events=events,
+        )
+        parsed = normalize_episode_source_events(parsed, events)
+        validation_issues = validate_episode_payload(
+            parsed,
+            events=events,
+            episode_number=episode.episode_index,
+            book_title=book_title,
+        )
+        if not validation_issues:
+            validation_issues = [
+                ValidationIssue(
+                    code="MANUAL_REPAIR_REQUEST",
+                    message="用户主动请求优化当前剧集结构，请在不新增剧情的前提下修复格式和字段一致性",
+                    path=None,
+                )
+            ]
+
+    variables = build_episode_variables(
+        db,
+        project,
+        book_title,
+        events,
+        episode.episode_index,
+    )
+    variables["validation_errors"] = [
+        {"code": issue.code, "message": issue.message, "path": issue.path}
+        for issue in validation_issues
+    ]
+    variables["raw_output"] = raw_output
+    variables["yaml_schema"] = variables.pop("yaml_schema_delta", None)
+    source_text = build_source_guard_text(
+        book_title,
+        events,
+        variables["characters"],
+        get_event_source_chapters(db, project, events),
+    )
+    try:
+        repair_yaml = call_llm_for_task(
+            db,
+            task_type="script_episode_repair",
+            variables=variables,
+        )
+    except LlmServiceError as exc:
+        raise ValueError("剧集修复调用失败") from exc
+    repaired = parse_yaml_payload(repair_yaml)
+    if not repaired or not episode_payload_matches_source(
+        repaired,
+        book_title=book_title,
+        source_text=source_text,
+    ):
+        raise ValueError("剧集修复结果未通过来源一致性校验")
+    repaired = normalize_episode_metadata(
+        repaired,
+        project,
+        episode_number=episode.episode_index,
+        book_title=book_title,
+        events=events,
+    )
+    repaired = normalize_episode_source_events(repaired, events)
+    repair_issues = validate_episode_payload(
+        repaired,
+        events=events,
+        episode_number=episode.episode_index,
+        book_title=book_title,
+    )
+    if repair_issues:
+        raise ValueError("剧集修复结果仍未通过结构校验")
+
+    episode.yaml_content = dump_episode_yaml(repaired)
+    episode.plain_text_content = build_episode_text(repaired)
+    episode.title = str(
+        repaired.get("script", {}).get("metadata", {}).get("title")
+        or episode.title
+    )
+    episode.status = "completed"
     db.commit()
     db.refresh(episode)
     return serialize_episode(episode)
