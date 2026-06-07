@@ -38,8 +38,10 @@ from app.schemas.script_adaptation_schema import (
     ScriptWorkflowProgress,
 )
 from app.services.llm_output_validation_service import (
+    ValidationIssue,
     is_semantically_duplicate_fact,
     normalize_fact_content,
+    should_skip_new_fact,
     validate_episode_payload,
 )
 from app.services.llm_service import LlmServiceError, call_llm_for_task
@@ -751,27 +753,27 @@ def merge_characters(
                 )
             )
         }
-        existing_contents = [
-            fact.content
-            for fact in db.scalars(
+        existing_fact_objects = list(
+            db.scalars(
                 select(ScriptCharacterFact).where(
                     ScriptCharacterFact.character_id == character.id,
                     ScriptCharacterFact.is_deleted.is_(False),
                     ScriptCharacterFact.status == "active",
                 )
             )
-        ]
+        )
         for fact in extract_character_facts(item):
             content = fact["content"].strip()
+            if not content or not normalize_fact_content(content):
+                continue
+            # v2: fact_type-aware dedup with state change detection
+            if should_skip_new_fact(
+                fact["fact_type"],
+                content,
+                existing_fact_objects,
+            ):
+                continue
             normalized = normalize_fact_content(content)
-            if not content or not normalized:
-                continue
-            # Layer 1: exact dedup after normalization
-            if normalized in existing_facts:
-                continue
-            # Layer 2: semantic dedup (n-gram Jaccard + SequenceMatcher)
-            if is_semantically_duplicate_fact(content, existing_contents):
-                continue
             db.add(
                 ScriptCharacterFact(
                     project_id=project_id,
@@ -1532,7 +1534,13 @@ def generate_one_episode(
         if validation_issues:
             needs_repair = True
     else:
-        validation_issues = []
+        validation_issues = [
+            ValidationIssue(
+                code="YAML_PARSE_ERROR",
+                message="原始输出无法解析为YAML，请检查缩进、冒号、列表结构、引号和非法附加文本",
+                path=None,
+            )
+        ]
 
     # ── Phase 3: repair (once) ───────────────────────────────────────
     used_fallback = False
