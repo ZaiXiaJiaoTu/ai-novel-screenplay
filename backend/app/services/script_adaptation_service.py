@@ -37,6 +37,11 @@ from app.schemas.script_adaptation_schema import (
     ScriptPlotEventUpdate,
     ScriptWorkflowProgress,
 )
+from app.services.llm_output_validation_service import (
+    is_semantically_duplicate_fact,
+    normalize_fact_content,
+    validate_episode_payload,
+)
 from app.services.llm_service import LlmServiceError, call_llm_for_task
 from app.utils.chapter_parser import count_words
 
@@ -441,10 +446,6 @@ def normalize_split_payload(payload: dict | None, chapters: list[Chapter]) -> di
     return {"events": events, "characters": characters}
 
 
-def normalize_fact_content(value: str) -> str:
-    return re.sub(r"[\s，,。；;：:、]+", "", value.strip().lower())[:500]
-
-
 def normalize_character_facts_payload(item: dict) -> dict:
     """Normalize a character item from any format to the standard facts schema.
 
@@ -543,10 +544,26 @@ def merge_characters(
                 )
             )
         }
+        existing_contents = [
+            fact.content
+            for fact in db.scalars(
+                select(ScriptCharacterFact).where(
+                    ScriptCharacterFact.character_id == character.id,
+                    ScriptCharacterFact.is_deleted.is_(False),
+                    ScriptCharacterFact.status == "active",
+                )
+            )
+        ]
         for fact in extract_character_facts(item):
             content = fact["content"].strip()
             normalized = normalize_fact_content(content)
-            if not content or not normalized or normalized in existing_facts:
+            if not content or not normalized:
+                continue
+            # Layer 1: exact dedup after normalization
+            if normalized in existing_facts:
+                continue
+            # Layer 2: semantic dedup (n-gram Jaccard + SequenceMatcher)
+            if is_semantically_duplicate_fact(content, existing_contents):
                 continue
             db.add(
                 ScriptCharacterFact(
@@ -560,6 +577,7 @@ def merge_characters(
                 )
             )
             existing_facts.add(normalized)
+            existing_contents.append(content)
         rebuild_character_profile(db, character)
 
 
@@ -1279,9 +1297,38 @@ def generate_one_episode(
         events=events,
     )
     script_payload = normalize_episode_source_events(script_payload, events)
+
+    # Business-rule validation (repair flow will be added in a follow-up)
+    validation_issues = validate_episode_payload(
+        script_payload,
+        events=events,
+        episode_number=next_index,
+        book_title=book_title,
+    )
+    used_fallback = parsed is None
+    severe_issues = [
+        issue for issue in validation_issues
+        if issue.code in ("MISSING_SCRIPT", "MISSING_OR_EMPTY_SCENES")
+    ]
+    if severe_issues and not used_fallback:
+        script_payload = fallback_episode_payload(project, next_index, events, book_title)
+        script_payload = normalize_episode_metadata(
+            script_payload,
+            project,
+            episode_number=next_index,
+            book_title=book_title,
+            events=events,
+        )
+        script_payload = normalize_episode_source_events(script_payload, events)
+        used_fallback = True
+
     yaml_content = dump_episode_yaml(script_payload)
     plain_text = build_episode_text(script_payload)
     metadata = script_payload["script"]["metadata"]
+    status = "completed"
+    if validation_issues and not used_fallback:
+        # Minor issues — still save but mark as draft for review
+        status = "draft"
     episode = ScriptEpisode(
         project_id=project.id,
         episode_index=next_index,
@@ -1289,7 +1336,7 @@ def generate_one_episode(
         event_ids=[event.id for event in events],
         yaml_content=yaml_content,
         plain_text_content=plain_text,
-        status="completed",
+        status=status,
     )
     db.add(episode)
     for event in events:
