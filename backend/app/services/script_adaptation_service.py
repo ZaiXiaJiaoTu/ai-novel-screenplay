@@ -44,6 +44,7 @@ from app.services.llm_output_validation_service import (
 )
 from app.services.llm_service import LlmServiceError, call_llm_for_task
 from app.utils.chapter_parser import count_words
+from app.utils.text_chunker import split_chapters_for_prompt
 
 
 TYPE_LABELS = {
@@ -479,6 +480,36 @@ def get_next_split_chapters(
     return done_batches + 1, chapters[start : start + CHAPTERS_PER_BATCH]
 
 
+# ── character context volume control (P2.2) ──────────────────────────────
+
+_PRIORITY_FACT_TYPES: tuple[str, ...] = (
+    "身份", "关系", "能力", "当前状态", "立场", "目标",
+)
+
+_MAX_FACTS_PER_CHARACTER: int = 20
+"""Hard cap on facts passed per character to control prompt volume."""
+
+
+def _select_key_facts(facts: list[ScriptCharacterFact]) -> list[dict]:
+    """Select and order facts for context volume control.
+
+    Priority fact types come first; the total is capped at
+    ``_MAX_FACTS_PER_CHARACTER``.
+    """
+    if not facts:
+        return []
+    priority: list[dict] = []
+    rest: list[dict] = []
+    for fact in facts:
+        entry = {"fact_type": fact.fact_type, "content": fact.content}
+        if fact.fact_type in _PRIORITY_FACT_TYPES:
+            priority.append(entry)
+        else:
+            rest.append(entry)
+    selected = priority + rest
+    return selected[:_MAX_FACTS_PER_CHARACTER]
+
+
 def build_character_context(db: Session, project_id: int) -> list[dict]:
     characters = db.scalars(
         select(ScriptCharacterProfile)
@@ -501,10 +532,7 @@ def build_character_context(db: Session, project_id: int) -> list[dict]:
         ).all()
         entry: dict = {
             "name": character.name,
-            "facts": [
-                {"fact_type": fact.fact_type, "content": fact.content}
-                for fact in facts
-            ],
+            "facts": _select_key_facts(facts),
         }
         # Include aliases from metadata_json if present (P1.2)
         metadata = character.metadata_json or {}
@@ -522,14 +550,16 @@ def build_split_variables(
         "book_title": book_title,
         "adaptation_config": build_adaptation_config(project),
         "existing_characters": build_character_context(db, project.id) if db is not None else [],
-        "chapters": [
-            {
-                "chapter_index": chapter.chapter_index,
-                "title": chapter.title,
-                "content": chapter.content[:5000],
-            }
-            for chapter in chapters
-        ],
+        "chapters": split_chapters_for_prompt(
+            [
+                {
+                    "chapter_index": chapter.chapter_index,
+                    "title": chapter.title,
+                    "content": chapter.content,
+                }
+                for chapter in chapters
+            ],
+        ),
         "output_contract": {
             "events": [{"content": "简洁且准确的一段剧情事件", "source_chapter_start": 1, "source_chapter_end": 1}],
             "characters": [
@@ -1118,14 +1148,16 @@ def build_episode_variables(
         "episode_number": episode_number,
         "events": [serialize_event(event).model_dump() for event in events],
         "characters": [character.model_dump() for character in relevant_characters],
-        "chapters": [
-            {
-                "chapter_index": chapter.chapter_index,
-                "title": chapter.title,
-                "content": chapter.content[:5000],
-            }
-            for chapter in chapters
-        ],
+        "chapters": split_chapters_for_prompt(
+            [
+                {
+                    "chapter_index": chapter.chapter_index,
+                    "title": chapter.title,
+                    "content": chapter.content,
+                }
+                for chapter in chapters
+            ],
+        ),
         "yaml_schema_delta": project.yaml_schema_delta,
     }
 
