@@ -3,7 +3,7 @@
     <div class="page-header settings-header">
       <div>
         <h1 class="page-title">模型配置</h1>
-        <p class="page-subtitle">管理大模型网关、模型名称和调用参数，供剧情拆分、人物整合与剧本生成链路使用。</p>
+        <p class="page-subtitle">管理大模型网关、模型名称和调用参数，供剧情拆分、人物整合、剧本生成与修复链路使用。</p>
       </div>
       <el-button type="primary" :icon="Plus" @click="openCreateDialog">新增配置</el-button>
     </div>
@@ -125,7 +125,8 @@ import {
 const taskOptions = [
   { label: "剧情事件拆分", value: "plot_event_split_generation" },
   { label: "单集剧本生成", value: "script_episode_generation" },
-  { label: "人物档案整合", value: "character_profile_consolidation" }
+  { label: "人物档案整合", value: "character_profile_consolidation" },
+  { label: "单集剧本修复", value: "script_episode_repair" }
 ];
 
 const configs = ref<LlmConfigDetail[]>([]);
