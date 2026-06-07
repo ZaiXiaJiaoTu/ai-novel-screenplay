@@ -5,6 +5,7 @@ from app.services.script_adaptation_service import (
     build_episode_text_from_yaml,
     episode_payload_matches_source,
     get_yaml_schema_delta,
+    normalize_character_facts_payload,
     normalize_episode_metadata,
     normalize_episode_source_events,
     normalize_fact_content,
@@ -205,3 +206,114 @@ def test_serialized_character_prefers_consolidated_profile():
     result = serialize_character(character)
 
     assert result.profile == "唐三，坚韧谨慎，重视亲情。"
+
+
+# ── normalize_character_facts_payload ──────────────────────────────
+
+
+def test_normalize_old_traits_format_to_facts():
+    """P0.1: Old format with 'traits' and 'trait_type' is normalized to 'facts'."""
+    item = {
+        "name": "唐三",
+        "traits": [
+            {"trait_type": "身份", "content": "圣魂村孩子"},
+            {"trait_type": "能力", "content": "蓝银草武魂"},
+        ],
+    }
+
+    result = normalize_character_facts_payload(item)
+
+    assert result["name"] == "唐三"
+    assert "facts" in result
+    assert "traits" not in result
+    assert result["facts"][0]["fact_type"] == "身份"
+    assert result["facts"][0]["content"] == "圣魂村孩子"
+    assert result["facts"][1]["fact_type"] == "能力"
+    assert result["facts"][1]["content"] == "蓝银草武魂"
+
+
+def test_normalize_new_facts_format_passes_through():
+    """P0.1: New format with 'facts' and 'fact_type' remains unchanged."""
+    item = {
+        "name": "小舞",
+        "facts": [
+            {"fact_type": "身份", "content": "诺丁学院学生"},
+        ],
+    }
+
+    result = normalize_character_facts_payload(item)
+
+    assert result["name"] == "小舞"
+    assert result["facts"] == [{"fact_type": "身份", "content": "诺丁学院学生"}]
+
+
+def test_normalize_features_format_to_facts():
+    """P0.1: Old 'features' format is also normalized."""
+    item = {
+        "name": "大师",
+        "features": [
+            {"feature_type": "身份", "content": "诺丁学院老师"},
+        ],
+    }
+
+    result = normalize_character_facts_payload(item)
+
+    assert result["facts"][0]["fact_type"] == "身份"
+    assert result["facts"][0]["content"] == "诺丁学院老师"
+
+
+def test_normalize_string_fact_items():
+    """String fact items get default fact_type."""
+    item = {
+        "name": "唐三",
+        "traits": ["蓝银草武魂觉醒", "先天满魂力"],
+    }
+
+    result = normalize_character_facts_payload(item)
+
+    assert result["facts"][0]["fact_type"] == "关键特征"
+    assert result["facts"][0]["content"] == "蓝银草武魂觉醒"
+    assert result["facts"][1]["content"] == "先天满魂力"
+
+
+def test_normalize_empty_name_returns_empty_string():
+    """Empty or missing name produces empty string."""
+    result = normalize_character_facts_payload({})
+    assert result["name"] == ""
+
+
+def test_normalize_fallback_profile_to_facts():
+    """When only profile exists, it becomes a single fact with fact_type='设定'."""
+    item = {"name": "玉小刚", "profile": "武魂理论大师，人称大师。"}
+
+    result = normalize_character_facts_payload(item)
+
+    assert result["facts"][0]["fact_type"] == "设定"
+    assert result["facts"][0]["content"] == "武魂理论大师，人称大师。"
+
+
+def test_normalize_no_facts_returns_empty_list():
+    """No facts, traits, features, or profile results in empty facts list."""
+    item = {"name": "Unknown"}
+
+    result = normalize_character_facts_payload(item)
+
+    assert result["facts"] == []
+
+
+def test_normalize_mixed_fact_keys():
+    """Mixed key types in facts are resolved per-fact."""
+    item = {
+        "name": "唐三",
+        "facts": [
+            {"fact_type": "身份", "content": "圣魂村孩子"},
+            {"trait_type": "能力", "content": "蓝银草武魂"},
+            {"type": "物品", "content": "玄天宝鉴"},
+        ],
+    }
+
+    result = normalize_character_facts_payload(item)
+
+    assert result["facts"][0]["fact_type"] == "身份"
+    assert result["facts"][1]["fact_type"] == "能力"
+    assert result["facts"][2]["fact_type"] == "物品"
