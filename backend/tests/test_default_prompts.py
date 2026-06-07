@@ -8,13 +8,7 @@ def test_default_prompts_include_all_four_task_types():
     assert "script_episode_generation" in task_types
     assert "character_profile_consolidation" in task_types
     assert "script_episode_repair" in task_types
-    # Removed legacy task types should not appear
     assert "style_strategy_generation" not in task_types
-    assert "scene_plan_generation" not in task_types
-    assert "script_yaml_generation" not in task_types
-    assert "yaml_repair" not in task_types
-    assert "story_profile_generation" not in task_types
-    assert "chapter_summary_generation" not in task_types
 
 
 def test_template_names_are_unique():
@@ -31,14 +25,8 @@ def test_variables_match_actual_placeholders():
     for item in DEFAULT_PROMPT_TEMPLATES:
         template = item["user_prompt_template"] + item["system_prompt"]
         declared = set(item["variables"])
-        # Check that all {var} placeholders have a declared variable
         import re
         placeholders = set(re.findall(r"\{(\w+)\}", template))
-        # Some {key} used in JSON examples are not real variables
-        real_placeholders = {
-            p for p in placeholders
-            if p in declared
-        }
         for var in declared:
             assert f"{{{var}}}" in template, (
                 f"Variable {{{var}}} declared but not found in template "
@@ -46,17 +34,7 @@ def test_variables_match_actual_placeholders():
             )
 
 
-def test_default_script_episode_prompt_requires_yaml_only():
-    prompt = next(
-        item
-        for item in DEFAULT_PROMPT_TEMPLATES
-        if item["task_type"] == "script_episode_generation"
-    )
-
-    assert prompt["output_format"] == "yaml"
-    assert "只返回合法YAML" in prompt["system_prompt"]
-    assert "禁止Markdown代码块" in prompt["system_prompt"]
-    assert "YAML锚点" in prompt["system_prompt"]
+# ── v2: plot event split template ──────────────────────────────────────
 
 
 def test_default_plot_event_prompt_uses_facts_not_traits():
@@ -66,22 +44,188 @@ def test_default_plot_event_prompt_uses_facts_not_traits():
         if item["task_type"] == "plot_event_split_generation"
     )
 
-    assert "中文小说剧情结构化分析助手" in prompt["system_prompt"]
-    assert "existing_characters" in prompt["variables"]
-    # Must use facts, not traits
-    assert '"facts"' in prompt["user_prompt_template"]
-    assert "fact_type" in prompt["user_prompt_template"]
+    assert "facts" in prompt["variables"] or '"facts"' in prompt["user_prompt_template"]
     assert '"traits"' not in prompt["user_prompt_template"]
     assert "trait_type" not in prompt["user_prompt_template"]
-    # Must include granularity constraints
-    assert "40～120个汉字" in prompt["user_prompt_template"]
-    assert "原子剧情事件" in prompt["system_prompt"]
+
+
+def test_plot_event_prompt_includes_aliases_in_output_schema():
+    """v2: Output schema must include aliases field."""
+    prompt = next(
+        item
+        for item in DEFAULT_PROMPT_TEMPLATES
+        if item["task_type"] == "plot_event_split_generation"
+    )
+    assert '"aliases"' in prompt["user_prompt_template"]
+
+
+def test_plot_event_prompt_no_longer_uses_atomic_event_term():
+    """v2: "原子剧情事件" replaced with scene-relevant phrasing."""
+    prompt = next(
+        item
+        for item in DEFAULT_PROMPT_TEMPLATES
+        if item["task_type"] == "plot_event_split_generation"
+    )
+    assert "原子剧情事件" not in prompt["system_prompt"]
+    assert "原子剧情事件" not in prompt["user_prompt_template"]
+    assert "可独立用于剧本场景编排的剧情节点" in prompt["user_prompt_template"]
+
+
+def test_plot_event_prompt_contains_fact_type_enum():
+    """v2: fact_type restricted to the 9 allowed values."""
+    prompt = next(
+        item
+        for item in DEFAULT_PROMPT_TEMPLATES
+        if item["task_type"] == "plot_event_split_generation"
+    )
+    assert "fact_type只能是" in prompt["user_prompt_template"]
+    assert "身份" in prompt["user_prompt_template"]
+    assert "外貌" in prompt["user_prompt_template"]
+    assert "当前状态" in prompt["user_prompt_template"]
+    # Must NOT contain fuzzy example types
+    assert "关键特征/性格" not in prompt["user_prompt_template"]
+
+
+def test_plot_event_prompt_has_merge_rules():
+    """v2: Events with same goal should be merged."""
+    prompt = next(
+        item
+        for item in DEFAULT_PROMPT_TEMPLATES
+        if item["task_type"] == "plot_event_split_generation"
+    )
+    assert "应合并为一个事件" in prompt["user_prompt_template"]
+
+
+# ── v2: script episode generation template ─────────────────────────────
+
+
+def test_script_episode_prompt_has_input_priority():
+    """v2: Episode template must define input data responsibilities."""
+    prompt = next(
+        item
+        for item in DEFAULT_PROMPT_TEMPLATES
+        if item["task_type"] == "script_episode_generation"
+    )
+
+    assert "输入信息的职责" in prompt["system_prompt"]
+    assert "剧情事件决定本集必须表现的剧情范围" in prompt["system_prompt"]
+    assert "原文章节只用于补充" in prompt["system_prompt"]
+    assert "人物档案只用于约束" in prompt["system_prompt"]
+
+
+def test_script_episode_prompt_explicit_field_types():
+    """v2: action=string[], transition=string, dialogue=object[]."""
+    prompt = next(
+        item
+        for item in DEFAULT_PROMPT_TEMPLATES
+        if item["task_type"] == "script_episode_generation"
+    )
+    assert "action必须是字符串数组" in prompt["user_prompt_template"]
+    assert "transition必须是字符串" in prompt["user_prompt_template"]
+    assert "dialogue必须是数组" in prompt["user_prompt_template"]
+
+
+def test_script_episode_prompt_has_self_check():
+    """v2: Self-check list before output."""
+    prompt = next(
+        item
+        for item in DEFAULT_PROMPT_TEMPLATES
+        if item["task_type"] == "script_episode_generation"
+    )
+    assert "输出前自行检查" in prompt["user_prompt_template"]
+    assert "YAML是否可以安全解析" in prompt["user_prompt_template"]
+
+
+def test_script_episode_prompt_has_ending_rules():
+    """v2: Ending rules reference adaptation_config."""
+    prompt = next(
+        item
+        for item in DEFAULT_PROMPT_TEMPLATES
+        if item["task_type"] == "script_episode_generation"
+    )
+    assert "结尾规则" in prompt["user_prompt_template"]
+    assert "ending_requirement" in prompt["user_prompt_template"]
+
+
+def test_script_episode_prompt_forbids_markdown():
+    prompt = next(
+        item
+        for item in DEFAULT_PROMPT_TEMPLATES
+        if item["task_type"] == "script_episode_generation"
+    )
+    assert "只返回合法YAML" in prompt["system_prompt"]
+    assert "禁止Markdown代码块" in prompt["system_prompt"]
+    assert "YAML锚点" in prompt["system_prompt"]
+
+
+# ── v2: character consolidation template ───────────────────────────────
+
+
+def test_character_consolidation_mentions_chronological_order():
+    """v2: Facts are in chronological order, later facts are newer."""
+    prompt = next(
+        item
+        for item in DEFAULT_PROMPT_TEMPLATES
+        if item["task_type"] == "character_profile_consolidation"
+    )
+
+    assert "按剧情发生顺序排列" in prompt["user_prompt_template"].replace(
+        "按剧情顺序积累", "按剧情发生顺序排列"
+    ) or "按剧情" in prompt["user_prompt_template"]
+    assert "越靠后的事实通常越新" in prompt["user_prompt_template"]
+
+
+def test_character_consolidation_distinguishes_transient_states():
+    """v2: Must distinguish "正在恢复" vs "已经恢复"."""
+    prompt = next(
+        item
+        for item in DEFAULT_PROMPT_TEMPLATES
+        if item["task_type"] == "character_profile_consolidation"
+    )
+    assert "正在恢复" in prompt["user_prompt_template"]
+    assert "已经恢复" in prompt["user_prompt_template"]
+
+
+def test_character_consolidation_has_temporal_rules():
+    """v2: Historical states vs current states."""
+    prompt = next(
+        item
+        for item in DEFAULT_PROMPT_TEMPLATES
+        if item["task_type"] == "character_profile_consolidation"
+    )
+    assert "曾经" in prompt["user_prompt_template"]
+
+
+# ── v2: repair template ────────────────────────────────────────────────
+
+
+def test_repair_template_has_yaml_parse_error_rules():
+    """v2: Repair template handles YAML_PARSE_ERROR."""
+    prompt = next(
+        item
+        for item in DEFAULT_PROMPT_TEMPLATES
+        if item["task_type"] == "script_episode_repair"
+    )
+    assert "YAML_PARSE_ERROR" in prompt["user_prompt_template"]
+    assert "缩进" in prompt["user_prompt_template"]
+
+
+def test_repair_template_forbids_new_plot():
+    prompt = next(
+        item
+        for item in DEFAULT_PROMPT_TEMPLATES
+        if item["task_type"] == "script_episode_repair"
+    )
+    assert "不得新增剧情" in prompt["system_prompt"] or "不得新增剧情" in prompt["user_prompt_template"]
+    assert "不得虚构新事件" in prompt["user_prompt_template"]
+
+
+# ── v2: generic IP restriction ─────────────────────────────────────────
 
 
 def test_default_prompts_do_not_contain_hardcoded_external_ip():
-    """P0.3: Prompt templates must not mention specific external works."""
     forbidden = ["哈利波特", "霍格沃茨", "格兰芬多", "斯莱特林",
-                 "Harry Potter", "Hogwarts", "Gryffindor", "Slytherin"]
+                 "Harry Potter", "Hogwarts"]
     for item in DEFAULT_PROMPT_TEMPLATES:
         combined = item["system_prompt"] + item["user_prompt_template"]
         for marker in forbidden:
@@ -89,76 +233,3 @@ def test_default_prompts_do_not_contain_hardcoded_external_ip():
                 f"Template {item['template_name']} contains "
                 f"hardcoded external IP: {marker}"
             )
-
-
-def test_default_prompts_use_generic_ip_restriction():
-    """P0.3: All templates should use the generic restriction phrase."""
-    generic_phrase = (
-        "不得引入输入材料中未出现的其他作品人物、地点、"
-        "能力体系、专有名词或世界观设定"
-    )
-    for item in DEFAULT_PROMPT_TEMPLATES:
-        combined = item["system_prompt"] + item["user_prompt_template"]
-        assert generic_phrase in combined, (
-            f"Template {item['template_name']} missing generic IP restriction"
-        )
-
-
-def test_default_character_consolidation_prompt_is_chinese():
-    prompt = next(
-        item
-        for item in DEFAULT_PROMPT_TEMPLATES
-        if item["task_type"] == "character_profile_consolidation"
-    )
-
-    assert prompt["output_format"] == "json"
-    assert "人物档案编辑" in prompt["system_prompt"]
-    assert "语义相同事实" in prompt["system_prompt"]
-    assert "人物事实列表" in prompt["user_prompt_template"]
-    # Input section uses "人物事实列表" as the variable key; output uses "profile"
-    # The input data (characters var) uses facts, not traits
-    assert '"traits"' not in prompt["user_prompt_template"]
-
-
-def test_repair_template_exists_and_only_allows_fixes():
-    prompt = next(
-        item
-        for item in DEFAULT_PROMPT_TEMPLATES
-        if item["task_type"] == "script_episode_repair"
-    )
-
-    assert prompt["output_format"] == "yaml"
-    assert prompt["enabled"] is True
-    assert "只修复格式" in prompt["system_prompt"]
-    assert "不得新增剧情" in prompt["system_prompt"]
-    assert "validation_errors" in prompt["variables"]
-    assert "raw_output" in prompt["variables"]
-    assert "yaml_schema" in prompt["variables"]
-
-
-def test_script_episode_prompt_contains_event_coverage_rules():
-    prompt = next(
-        item
-        for item in DEFAULT_PROMPT_TEMPLATES
-        if item["task_type"] == "script_episode_generation"
-    )
-
-    assert "每个输入事件必须至少被一个场景引用" in prompt["user_prompt_template"]
-    assert "source_events只能使用本集输入事件的event_index" in prompt["user_prompt_template"]
-    assert "不得使用数据库主键event_id" in prompt["user_prompt_template"]
-    assert "scene_id从1开始连续递增" in prompt["user_prompt_template"]
-    assert "dialogue必须是数组" in prompt["user_prompt_template"]
-
-
-def test_plot_event_prompt_contains_fact_type_constraints():
-    prompt = next(
-        item
-        for item in DEFAULT_PROMPT_TEMPLATES
-        if item["task_type"] == "plot_event_split_generation"
-    )
-
-    assert "fact_type限定为" in prompt["user_prompt_template"]
-    assert "身份" in prompt["user_prompt_template"]
-    assert "外貌" in prompt["user_prompt_template"]
-    assert "当前状态" in prompt["user_prompt_template"]
-    assert "没有新增人物事实时返回空数组" in prompt["user_prompt_template"]

@@ -561,17 +561,35 @@ def build_split_variables(
             ],
         ),
         "output_contract": {
-            "events": [{"content": "简洁且准确的一段剧情事件", "source_chapter_start": 1, "source_chapter_end": 1}],
+            "events": [
+                {
+                    "content": "人物采取关键行动，并产生直接剧情结果",
+                    "source_chapter_start": 1,
+                    "source_chapter_end": 1,
+                }
+            ],
             "characters": [
                 {
                     "name": "人物标准名称",
+                    "aliases": ["原文中的其他明确称呼"],
                     "facts": [
                         {
-                            "fact_type": "关键特征/性格/能力/关系/当前状态",
-                            "content": "只写本批章节带来的新增关键特征或状态变化，不写完整人物介绍",
+                            "fact_type": "身份",
+                            "content": "新增或发生变化的人物事实",
                         }
                     ],
                 }
+            ],
+            "allowed_fact_types": [
+                "身份",
+                "外貌",
+                "性格",
+                "能力",
+                "物品",
+                "关系",
+                "立场",
+                "目标",
+                "当前状态",
             ],
         },
     }
