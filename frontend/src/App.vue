@@ -9,7 +9,7 @@
         </el-menu-item>
         <el-menu-item index="/books">
           <el-icon><Collection /></el-icon>
-          <span>待选书架</span>
+          <span>小说书架</span>
         </el-menu-item>
         <el-menu-item index="/scripts">
           <el-icon><Document /></el-icon>

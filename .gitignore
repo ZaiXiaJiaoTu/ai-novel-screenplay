@@ -8,3 +8,8 @@ frontend/.vite/
 .env
 .DS_Store
 .runtime-*.log
+.coverage
+htmlcov/
+*.sqlite
+*.sqlite3
+*.db

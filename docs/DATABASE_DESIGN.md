@@ -1,434 +1,290 @@
 # 数据库设计文档
 
-## 1. 数据库说明
+## 1. 概述
 
-本系统数据库采用PostgreSQL，用于存储用户、小说作品、章节、章节摘要、故事设定档案、剧本生成任务、剧本项目、剧本片段、大模型配置、提示词模板和模型调用日志。
+数据库使用 PostgreSQL。核心数据包括小说作品、章节、剧本改编项目、剧情事件批次、剧情事件、人物档案、人物特征事实、分集剧本、大模型配置、提示词模板、提示词版本、调用日志和导出记录。
 
-由于系统中存在大量结构化和半结构化数据，例如人物设定、人物关系、章节摘要、生成配置、改编范围、提示词变量和模型适用任务等内容，相关字段统一使用PostgreSQL的JSONB类型进行存储。
+历史模块 `chapter_summaries`、`story_profiles`、`generation_tasks`、`script_segments` 已废弃，不属于当前结项版本。
 
-开发环境和生产环境均推荐使用PostgreSQL，避免SQLite与PostgreSQL之间的数据类型差异影响后续迁移。
+## 2. 表清单
 
----
+| 表名 | 说明 |
+| --- | --- |
+| users | 用户预留表 |
+| books | 小说作品 |
+| chapters | 小说章节 |
+| script_projects | 剧本改编项目 |
+| script_event_batches | 剧情事件拆分批次 |
+| script_plot_events | 剧情事件 |
+| script_character_profiles | 人物档案 |
+| script_character_facts | 人物特征事实 |
+| script_episodes | 分集剧本 |
+| llm_configs | 大模型配置 |
+| prompt_templates | 提示词模板 |
+| prompt_template_versions | 提示词版本 |
+| llm_call_logs | 大模型调用日志 |
+| export_records | 导出记录 |
 
-## 2. PostgreSQL字段类型约定
-
-| 业务含义 | PostgreSQL类型 |
-|---|---|
-| 主键ID | BIGSERIAL |
-| 外键ID | BIGINT |
-| 普通字符串 | VARCHAR |
-| 长文本 | TEXT |
-| 时间 | TIMESTAMP |
-| 布尔值 | BOOLEAN |
-| JSON数据 | JSONB |
-| 整数 | INTEGER |
-| 小数 | NUMERIC |
-
----
-
-## 3. 核心表总览
-
-```text
-users：用户表
-books：小说作品表
-chapters：小说章节表
-chapter_summaries：章节摘要表
-story_profiles：故事设定档案表
-generation_tasks：剧本生成任务表
-generation_artifacts：生成中间成果表
-script_projects：剧本项目表
-script_segments：剧本片段表
-llm_configs：大模型配置表
-prompt_templates：提示词模板表
-prompt_template_versions：提示词模板版本表
-llm_call_logs：大模型调用日志表
-export_records：导出记录表
-```
-
----
-
-## 4. users用户表
+## 3. users
 
 | 字段 | 类型 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | id | BIGSERIAL | 主键 |
-| username | VARCHAR(100) | 用户名 |
-| password_hash | VARCHAR(255) | 密码哈希 |
+| username | VARCHAR(100) | 用户名，唯一 |
+| password_hash | VARCHAR(255) | 密码哈希，当前未启用 |
 | nickname | VARCHAR(100) | 昵称 |
 | email | VARCHAR(255) | 邮箱 |
 | created_at | TIMESTAMP | 创建时间 |
 | updated_at | TIMESTAMP | 更新时间 |
-| is_deleted | BOOLEAN | 是否删除 |
+| is_deleted | BOOLEAN | 软删除 |
 
-建议默认值：
-
-```sql
-is_deleted BOOLEAN DEFAULT FALSE
-created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-```
-
-说明：
-
-初版系统不区分管理员和普通用户，因此不需要role字段。
-
----
-
-## 5. books小说作品表
+## 4. books
 
 | 字段 | 类型 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | id | BIGSERIAL | 主键 |
-| user_id | BIGINT | 用户ID |
-| title | VARCHAR(255) | 作品名称，可修改 |
+| user_id | BIGINT | 预留用户 ID |
+| title | VARCHAR(255) | 作品名称 |
 | original_filename | VARCHAR(255) | 原始文件名 |
-| source_type | VARCHAR(50) | file/text |
+| source_type | VARCHAR(50) | text/file |
 | novel_type | VARCHAR(50) | short/middle/long |
 | word_count | INTEGER | 总字数 |
 | chapter_count | INTEGER | 章节数 |
-| preprocess_status | VARCHAR(50) | pending/processing/completed/failed |
-| story_profile_status | VARCHAR(50) | pending/generated/confirmed/failed |
+| preprocess_status | VARCHAR(50) | 预处理状态，当前用于上传完成标记 |
 | error_message | TEXT | 错误信息 |
 | created_at | TIMESTAMP | 创建时间 |
 | updated_at | TIMESTAMP | 更新时间 |
 | deleted_at | TIMESTAMP | 删除时间 |
-| is_deleted | BOOLEAN | 是否删除 |
+| is_deleted | BOOLEAN | 软删除 |
 
-说明：
+删除小说时同步软删除章节和关联剧本改编数据。
 
-novel_type用于区分短篇、中篇、长篇小说。
-
-```text
-short：短篇小说
-middle：中篇小说
-long：长篇小说
-```
-
----
-
-## 6. chapters小说章节表
+## 5. chapters
 
 | 字段 | 类型 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | id | BIGSERIAL | 主键 |
-| book_id | BIGINT | 作品ID |
+| book_id | BIGINT | 作品 ID |
 | chapter_index | INTEGER | 章节序号 |
 | title | VARCHAR(255) | 章节标题 |
 | content | TEXT | 章节正文 |
-| word_count | INTEGER | 章节字数 |
+| word_count | INTEGER | 字数 |
 | created_at | TIMESTAMP | 创建时间 |
 | updated_at | TIMESTAMP | 更新时间 |
-| is_deleted | BOOLEAN | 是否删除 |
+| is_deleted | BOOLEAN | 软删除 |
 
-说明：
-
-一个book可以对应多个chapter。
-
----
-
-## 7. chapter_summaries章节摘要表
+## 6. script_projects
 
 | 字段 | 类型 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | id | BIGSERIAL | 主键 |
-| book_id | BIGINT | 作品ID |
-| chapter_id | BIGINT | 章节ID |
-| summary | TEXT | 章节摘要 |
-| characters | JSONB | 本章人物 |
-| key_events | JSONB | 关键事件 |
-| locations | JSONB | 地点 |
-| clues | JSONB | 伏笔线索 |
-| emotion_changes | JSONB | 情绪变化 |
-| created_at | TIMESTAMP | 创建时间 |
-| updated_at | TIMESTAMP | 更新时间 |
-
----
-
-## 8. story_profiles故事设定档案表
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| id | BIGSERIAL | 主键 |
-| book_id | BIGINT | 作品ID |
-| title | VARCHAR(255) | 故事标题 |
-| genre | VARCHAR(100) | 题材类型 |
-| overview | TEXT | 故事简介 |
-| world_setting | TEXT | 世界观 |
-| main_conflict | TEXT | 主线冲突 |
-| characters | JSONB | 人物设定 |
-| relationships | JSONB | 人物关系 |
-| key_events | JSONB | 关键事件 |
-| chapter_outlines | JSONB | 章节梗概 |
-| clues | JSONB | 伏笔线索 |
-| tone | VARCHAR(100) | 叙事基调 |
-| locked_settings | JSONB | 核心设定 |
-| version | INTEGER | 版本号 |
-| confirmed | BOOLEAN | 是否确认 |
-| created_at | TIMESTAMP | 创建时间 |
-| updated_at | TIMESTAMP | 更新时间 |
-
-说明：
-
-故事设定档案由系统在小说预处理阶段生成，用户可以在待选书架中修改。修改后version递增。
-
----
-
-## 9. generation_tasks生成任务表
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| id | BIGSERIAL | 主键 |
-| user_id | BIGINT | 用户ID |
-| book_id | BIGINT | 作品ID |
-| script_project_id | BIGINT | 剧本项目ID，可为空 |
-| task_type | VARCHAR(100) | script_generation/preprocess等 |
-| status | VARCHAR(50) | pending/running/paused/failed/completed/canceled |
-| current_step | VARCHAR(100) | 当前步骤 |
-| adapt_scope | JSONB | 改编范围 |
-| generation_config | JSONB | 生成配置 |
-| error_message | TEXT | 错误信息 |
-| created_at | TIMESTAMP | 创建时间 |
-| updated_at | TIMESTAMP | 更新时间 |
-| finished_at | TIMESTAMP | 完成时间 |
-
-current_step建议值：
-
-```text
-style_strategy
-scene_planning
-script_yaml
-save_script
-```
-
----
-
-## 10. generation_artifacts生成中间成果表
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| id | BIGSERIAL | 主键 |
-| task_id | BIGINT | 任务ID |
-| artifact_type | VARCHAR(100) | style_strategy/scene_plan/script_yaml |
-| content | JSONB | 成果内容 |
-| version | INTEGER | 版本号 |
-| editable | BOOLEAN | 是否可编辑 |
-| created_at | TIMESTAMP | 创建时间 |
-| updated_at | TIMESTAMP | 更新时间 |
-
-说明：
-
-用于任务中断恢复和中间结果查看。用户可以查看和修改部分中间成果。
-
----
-
-## 11. script_projects剧本项目表
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| id | BIGSERIAL | 主键 |
-| user_id | BIGINT | 用户ID |
-| book_id | BIGINT | 来源作品ID |
-| project_name | VARCHAR(255) | 剧本项目名称，可修改 |
-| script_type | VARCHAR(100) | 剧本类型 |
-| default_style | VARCHAR(100) | 默认风格 |
-| default_compression_level | VARCHAR(50) | 默认压缩程度 |
-| default_target_duration | INTEGER | 默认目标时长，单位分钟 |
-| status | VARCHAR(50) | ongoing/completed |
+| user_id | BIGINT | 预留用户 ID |
+| book_id | BIGINT | 来源小说 |
+| project_name | VARCHAR(255) | 项目名称 |
+| script_type | VARCHAR(100) | tv/short_drama/animation/audio_drama |
+| default_style | VARCHAR(100) | 改编类型中文标签 |
+| default_compression_level | VARCHAR(50) | 预留字段 |
+| default_target_duration | INTEGER | 单集目标时长 |
+| pacing | VARCHAR(50) | fast/medium/slow |
+| scene_frequency | VARCHAR(50) | high/medium/low |
+| dialogue_density | VARCHAR(50) | high/medium/low |
+| events_per_episode | INTEGER | 每集事件数 |
+| yaml_schema_delta | JSONB | 不同剧本类型的 YAML 差分 |
+| split_status | VARCHAR(50) | idle/running/stopped |
+| split_stop_requested | BOOLEAN | 剧情拆分停止标记 |
+| generation_status | VARCHAR(50) | idle/running/stopped |
+| generation_stop_requested | BOOLEAN | 剧集生成停止标记 |
+| status | VARCHAR(50) | 项目状态 |
 | created_at | TIMESTAMP | 创建时间 |
 | updated_at | TIMESTAMP | 更新时间 |
 | deleted_at | TIMESTAMP | 删除时间 |
-| is_deleted | BOOLEAN | 是否删除 |
+| is_deleted | BOOLEAN | 软删除 |
 
-说明：
-
-一部小说可以生成多个剧本项目。
-
----
-
-## 12. script_segments剧本片段表
+## 7. script_event_batches
 
 | 字段 | 类型 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | id | BIGSERIAL | 主键 |
-| project_id | BIGINT | 剧本项目ID |
-| book_id | BIGINT | 来源作品ID |
-| segment_name | VARCHAR(255) | 片段名称，可修改 |
-| adapt_scope | JSONB | 改编范围 |
-| style_source | VARCHAR(50) | inherit_project/custom |
-| style | VARCHAR(100) | 片段风格 |
-| compression_level | VARCHAR(50) | 压缩程度 |
-| target_duration | INTEGER | 目标时长，单位分钟 |
-| actual_word_count | INTEGER | 实际生成字数 |
-| scene_count | INTEGER | 场景数量 |
-| yaml_content | TEXT | 剧本YAML |
-| plain_text_content | TEXT | 普通文本内容 |
+| project_id | BIGINT | 剧本项目 ID |
+| book_id | BIGINT | 来源小说 ID |
+| batch_index | INTEGER | 批次序号 |
+| chapter_start_index | INTEGER | 起始章节 |
+| chapter_end_index | INTEGER | 结束章节 |
+| status | VARCHAR(50) | 批次状态 |
+| raw_response | JSONB | 模型原始结构化响应 |
+| created_at | TIMESTAMP | 创建时间 |
+| updated_at | TIMESTAMP | 更新时间 |
+
+当前策略为每 3 章一个批次。
+
+## 8. script_plot_events
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| id | BIGSERIAL | 主键 |
+| project_id | BIGINT | 剧本项目 ID |
+| batch_id | BIGINT | 拆分批次 ID |
+| event_index | INTEGER | 全剧本剧情事件序号 |
+| content | TEXT | 剧情事件内容 |
+| source_chapter_start | INTEGER | 来源章节起始 |
+| source_chapter_end | INTEGER | 来源章节结束 |
+| locked | BOOLEAN | 是否已用于剧集生成 |
+| created_at | TIMESTAMP | 创建时间 |
+| updated_at | TIMESTAMP | 更新时间 |
+| deleted_at | TIMESTAMP | 删除时间 |
+| is_deleted | BOOLEAN | 软删除 |
+
+## 9. script_character_profiles
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| id | BIGSERIAL | 主键 |
+| project_id | BIGINT | 剧本项目 ID |
+| name | VARCHAR(255) | 人物名称 |
+| profile | TEXT | 当前人物档案 |
+| metadata_json | JSONB | 结构化元数据，如 AI 整合档案 |
+| created_at | TIMESTAMP | 创建时间 |
+| updated_at | TIMESTAMP | 更新时间 |
+| deleted_at | TIMESTAMP | 删除时间 |
+| is_deleted | BOOLEAN | 软删除 |
+
+## 10. script_character_facts
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| id | BIGSERIAL | 主键 |
+| project_id | BIGINT | 剧本项目 ID |
+| character_id | BIGINT | 人物 ID |
+| batch_id | BIGINT | 来源拆分批次 |
+| fact_type | VARCHAR(100) | 特征类型 |
+| content | TEXT | 特征内容 |
+| normalized_content | VARCHAR(500) | 去重用标准化文本 |
+| status | VARCHAR(50) | active |
+| created_at | TIMESTAMP | 创建时间 |
+| updated_at | TIMESTAMP | 更新时间 |
+| deleted_at | TIMESTAMP | 删除时间 |
+| is_deleted | BOOLEAN | 软删除 |
+
+## 11. script_episodes
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| id | BIGSERIAL | 主键 |
+| project_id | BIGINT | 剧本项目 ID |
+| episode_index | INTEGER | 分集序号 |
+| title | VARCHAR(255) | 分集标题 |
+| event_ids | JSONB | 使用的剧情事件数据库 ID |
+| yaml_content | TEXT | 剧集 YAML |
+| plain_text_content | TEXT | 渲染后的 TXT |
 | status | VARCHAR(50) | completed/draft |
 | created_at | TIMESTAMP | 创建时间 |
 | updated_at | TIMESTAMP | 更新时间 |
 | deleted_at | TIMESTAMP | 删除时间 |
-| is_deleted | BOOLEAN | 是否删除 |
+| is_deleted | BOOLEAN | 软删除 |
 
-说明：
+`yaml_content` 中的 `script.metadata.episode_number` 必须与 `episode_index` 一致。
 
-一个剧本项目可以包含多个剧本片段。剧本片段可以对应单章、章节区间、分卷、人物线或剧情片段。
-
----
-
-## 13. llm_configs大模型配置表
+## 12. llm_configs
 
 | 字段 | 类型 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | id | BIGSERIAL | 主键 |
-| provider | VARCHAR(100) | 模型供应商 |
-| base_url | VARCHAR(500) | 接口地址 |
-| api_key_encrypted | TEXT | 加密后的APIKey |
-| api_key_masked | VARCHAR(100) | 脱敏展示 |
+| provider | VARCHAR(100) | 供应商 |
+| base_url | VARCHAR(500) | OpenAI 兼容 Base URL |
+| api_key_encrypted | TEXT | 加密 API Key |
+| api_key_masked | VARCHAR(100) | 掩码 |
 | model_name | VARCHAR(100) | 模型名称 |
-| temperature | NUMERIC(4,2) | 温度参数 |
+| temperature | NUMERIC(4,2) | 温度 |
 | top_p | NUMERIC(4,2) | top_p |
-| max_tokens | INTEGER | 最大输出Token |
-| timeout_seconds | INTEGER | 超时时间 |
+| max_tokens | INTEGER | 最大 token |
+| timeout_seconds | INTEGER | 超时秒数 |
 | retry_count | INTEGER | 重试次数 |
-| task_scope | JSONB | 适用任务 |
-| is_default | BOOLEAN | 是否默认 |
-| enabled | BOOLEAN | 是否启用 |
+| task_scope | JSONB | 适用任务类型 |
+| is_default | BOOLEAN | 默认配置 |
+| enabled | BOOLEAN | 启用状态 |
 | created_at | TIMESTAMP | 创建时间 |
 | updated_at | TIMESTAMP | 更新时间 |
-| is_deleted | BOOLEAN | 是否删除 |
+| is_deleted | BOOLEAN | 软删除 |
 
-说明：
-
-APIKey必须加密保存。前端只能展示api_key_masked字段。
-
----
-
-## 14. prompt_templates提示词模板表
+## 13. prompt_templates
 
 | 字段 | 类型 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | id | BIGSERIAL | 主键 |
 | template_name | VARCHAR(255) | 模板名称 |
 | task_type | VARCHAR(100) | 任务类型 |
 | system_prompt | TEXT | 系统提示词 |
 | user_prompt_template | TEXT | 用户提示词模板 |
 | output_format | VARCHAR(50) | json/yaml/text |
-| variables | JSONB | 可用变量 |
-| version | INTEGER | 版本号 |
-| enabled | BOOLEAN | 是否启用 |
+| variables | JSONB | 变量名 |
+| version | INTEGER | 当前版本 |
+| enabled | BOOLEAN | 启用状态 |
 | created_at | TIMESTAMP | 创建时间 |
 | updated_at | TIMESTAMP | 更新时间 |
-| is_deleted | BOOLEAN | 是否删除 |
+| is_deleted | BOOLEAN | 软删除 |
 
-task_type建议值：
-
-```text
-chapter_summary_generation
-story_profile_generation
-style_strategy_generation
-scene_plan_generation
-script_yaml_generation
-yaml_repair
-```
-
----
-
-## 15. prompt_template_versions提示词模板版本表
+## 14. prompt_template_versions
 
 | 字段 | 类型 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | id | BIGSERIAL | 主键 |
-| template_id | BIGINT | 模板ID |
+| template_id | BIGINT | 模板 ID |
 | version | INTEGER | 版本号 |
 | system_prompt | TEXT | 系统提示词 |
 | user_prompt_template | TEXT | 用户提示词模板 |
 | output_format | VARCHAR(50) | 输出格式 |
-| variables | JSONB | 变量列表 |
+| variables | JSONB | 变量 |
 | created_at | TIMESTAMP | 创建时间 |
 
-说明：
-
-每次修改提示词模板时，都应写入一条版本记录，方便回滚。
-
----
-
-## 16. llm_call_logs大模型调用日志表
+## 15. llm_call_logs
 
 | 字段 | 类型 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | id | BIGSERIAL | 主键 |
-| task_id | BIGINT | 生成任务ID |
-| llm_config_id | BIGINT | 模型配置ID |
-| prompt_template_id | BIGINT | 提示词模板ID |
-| task_type | VARCHAR(100) | 调用任务类型 |
+| llm_config_id | BIGINT | 模型配置 ID |
+| prompt_template_id | BIGINT | 提示词模板 ID |
+| task_type | VARCHAR(100) | 任务类型 |
 | request_summary | TEXT | 请求摘要 |
 | response_summary | TEXT | 响应摘要 |
-| input_tokens | INTEGER | 输入Token |
-| output_tokens | INTEGER | 输出Token |
-| total_tokens | INTEGER | 总Token |
+| input_tokens | INTEGER | 输入 token |
+| output_tokens | INTEGER | 输出 token |
+| total_tokens | INTEGER | 总 token |
 | status | VARCHAR(50) | success/failed |
 | error_message | TEXT | 错误信息 |
-| latency_ms | INTEGER | 响应耗时 |
+| latency_ms | INTEGER | 耗时 |
 | created_at | TIMESTAMP | 创建时间 |
 
-注意：
-
-日志中不要保存完整小说原文，避免敏感内容泄露。
-
----
-
-## 17. export_records导出记录表
+## 16. export_records
 
 | 字段 | 类型 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | id | BIGSERIAL | 主键 |
-| user_id | BIGINT | 用户ID |
-| project_id | BIGINT | 剧本项目ID |
-| segment_id | BIGINT | 剧本片段ID，可为空 |
-| export_type | VARCHAR(50) | project/segment |
-| file_format | VARCHAR(50) | yaml/txt/docx/pdf |
-| file_path | VARCHAR(500) | 文件路径 |
+| user_id | BIGINT | 预留用户 ID |
+| project_id | BIGINT | 剧本项目 ID |
+| export_type | VARCHAR(50) | episode/all |
+| file_format | VARCHAR(50) | yaml/txt |
+| file_path | VARCHAR(500) | 导出文件名 |
 | created_at | TIMESTAMP | 创建时间 |
 
----
+## 17. 关系
 
-## 18. 核心关系
-
-```text
-users 1 - N books
-
-books 1 - N chapters
-books 1 - N chapter_summaries
-books 1 - 1 story_profiles
-
-books 1 - N script_projects
-script_projects 1 - N script_segments
-
-generation_tasks 1 - N generation_artifacts
-
-llm_configs 1 - N llm_call_logs
-prompt_templates 1 - N prompt_template_versions
-prompt_templates 1 - N llm_call_logs
+```mermaid
+erDiagram
+  BOOKS ||--o{ CHAPTERS : contains
+  BOOKS ||--o{ SCRIPT_PROJECTS : adapts
+  SCRIPT_PROJECTS ||--o{ SCRIPT_EVENT_BATCHES : splits
+  SCRIPT_EVENT_BATCHES ||--o{ SCRIPT_PLOT_EVENTS : contains
+  SCRIPT_PROJECTS ||--o{ SCRIPT_CHARACTER_PROFILES : has
+  SCRIPT_CHARACTER_PROFILES ||--o{ SCRIPT_CHARACTER_FACTS : has
+  SCRIPT_PROJECTS ||--o{ SCRIPT_EPISODES : generates
+  PROMPT_TEMPLATES ||--o{ PROMPT_TEMPLATE_VERSIONS : versions
+  LLM_CONFIGS ||--o{ LLM_CALL_LOGS : records
 ```
 
----
+## 18. 初始化与清理脚本
 
-## 19. 索引建议
-
-建议为以下字段建立索引：
-
-```sql
-CREATE INDEX idx_books_user_id ON books(user_id);
-CREATE INDEX idx_books_novel_type ON books(novel_type);
-CREATE INDEX idx_chapters_book_id ON chapters(book_id);
-CREATE INDEX idx_chapters_book_index ON chapters(book_id, chapter_index);
-CREATE INDEX idx_story_profiles_book_id ON story_profiles(book_id);
-CREATE INDEX idx_generation_tasks_user_id ON generation_tasks(user_id);
-CREATE INDEX idx_generation_tasks_book_id ON generation_tasks(book_id);
-CREATE INDEX idx_script_projects_user_id ON script_projects(user_id);
-CREATE INDEX idx_script_projects_book_id ON script_projects(book_id);
-CREATE INDEX idx_script_segments_project_id ON script_segments(project_id);
-CREATE INDEX idx_llm_call_logs_task_id ON llm_call_logs(task_id);
-CREATE INDEX idx_prompt_templates_task_type ON prompt_templates(task_type);
-```
-
-JSONB字段后续如果需要检索，可以补充GIN索引。
+- `sql/init.sql`：结项版本全量建库脚本。
+- `sql/update_default_prompt_templates_zh.sql`：更新默认提示词模板。
+- `sql/cleanup_legacy_bookshelf.sql`：清理旧小说摘要/设定模块。
+- `sql/cleanup_legacy_script_flow.sql`：清理旧剧本任务和片段模块。
+- `sql/upgrade_script_adaptation_workflow.sql`、`sql/upgrade_script_character_facts.sql`：历史增量升级脚本，保留用于老库升级。
