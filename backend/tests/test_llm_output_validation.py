@@ -1,6 +1,7 @@
 """Tests for llm_output_validation_service: fact dedup and episode validation."""
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -359,3 +360,69 @@ def test_all_events_covered_passes():
 def test_validation_issue_is_hashable():
     issue = ValidationIssue("CODE", "message", "path")
     assert {issue, issue}  # won't raise
+
+
+# ── should_skip_new_fact (v2) ───────────────────────────────────────────
+
+
+def _make_existing_fact(fact_type: str, content: str) -> MagicMock:
+    return MagicMock(
+        fact_type=fact_type,
+        content=content,
+        normalized_content=normalize_fact_content(content),
+    )
+
+
+def test_exact_duplicate_always_skipped():
+    from app.services.llm_output_validation_service import should_skip_new_fact
+    existing = [_make_existing_fact("身份", "唐三为圣魂村孩子")]
+    assert should_skip_new_fact("身份", "唐三为圣魂村孩子", existing) is True
+
+
+def test_punctuation_variant_skipped():
+    from app.services.llm_output_validation_service import should_skip_new_fact
+    existing = [_make_existing_fact("能力", "唐三拥有蓝银草武魂")]
+    assert should_skip_new_fact("能力", "唐三拥有蓝银草武魂。", existing) is True
+
+
+def test_near_duplicate_stable_fact_skipped():
+    from app.services.llm_output_validation_service import should_skip_new_fact
+    existing = [_make_existing_fact("性格", "唐三性格坚韧谨慎")]
+    assert should_skip_new_fact("性格", "唐三的性格坚韧而谨慎", existing) is True
+
+
+def test_state_change_not_skipped():
+    """v2: "正在恢复" vs "已经恢复" should NOT be deduped."""
+    from app.services.llm_output_validation_service import should_skip_new_fact
+    existing = [_make_existing_fact("当前状态", "阿银正在恢复人形")]
+    assert should_skip_new_fact("当前状态", "阿银已经恢复人形", existing) is False
+
+
+def test_join_vs_leave_not_skipped():
+    """v2: "加入组织" vs "离开组织" should NOT be deduped."""
+    from app.services.llm_output_validation_service import should_skip_new_fact
+    existing = [_make_existing_fact("关系", "唐三加入唐门")]
+    assert should_skip_new_fact("关系", "唐三离开唐门", existing) is False
+
+
+def test_relationship_change_not_skipped():
+    """v2: "关系亲密" vs "关系决裂" should NOT be deduped."""
+    from app.services.llm_output_validation_service import should_skip_new_fact
+    existing = [_make_existing_fact("关系", "唐三与小舞关系亲密")]
+    assert should_skip_new_fact("关系", "唐三与小舞关系决裂", existing) is False
+
+
+def test_different_fact_type_higher_threshold():
+    """v2: Different fact_types require higher similarity to dedup."""
+    from app.services.llm_output_validation_service import should_skip_new_fact
+    existing = [_make_existing_fact("身份", "唐三为圣魂村孩子")]
+    # Same text but different type — should still skip (very high similarity)
+    assert should_skip_new_fact("目标", "唐三为圣魂村孩子", existing) is True
+
+
+def test_different_fact_type_moderate_similarity_not_skipped():
+    """v2: Different fact_types with moderate similarity are not deduped."""
+    from app.services.llm_output_validation_service import should_skip_new_fact
+    existing = [_make_existing_fact("身份", "唐三为圣魂村普通孩子")]
+    # Different type, only moderate overlap → keep
+    assert should_skip_new_fact("性格", "唐三性格坚韧", existing) is False

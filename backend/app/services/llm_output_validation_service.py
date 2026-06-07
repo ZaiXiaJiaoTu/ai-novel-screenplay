@@ -128,6 +128,64 @@ def has_state_change_indicator(new_content: str, old_content: str) -> bool:
     return False
 
 
+# ── fact-type-aware dedup (v2) ─────────────────────────────────────────
+
+
+def should_skip_new_fact(
+    new_fact_type: str,
+    new_content: str,
+    existing_facts: list["ScriptCharacterFact"],
+) -> bool:
+    """Decide whether *new_content* should be skipped as duplicate.
+
+    Rules (in order):
+    1. Exact normalized match → always skip.
+    2. Same fact_type + state change indicator → keep (don't skip).
+    3. Same fact_type + high semantic similarity → skip.
+    4. Different fact_type → only skip if similarity is very high.
+
+    Accepts any objects with ``fact_type``, ``content``, and optionally
+    ``normalized_content`` attributes (duck-typing for testability).
+    """
+    norm_new = normalize_fact_content(new_content)
+    if not norm_new:
+        return True
+
+    for existing in existing_facts:
+        existing_type = getattr(existing, "fact_type", None)
+        existing_content = getattr(existing, "content", None)
+        if not existing_type or not existing_content:
+            continue
+        norm_existing = getattr(existing, "normalized_content", None) or normalize_fact_content(
+            str(existing_content)
+        )
+        if not norm_existing:
+            continue
+
+        # 1. exact match → duplicate
+        if norm_new == norm_existing:
+            return True
+
+        # 2. same changeable type + state change → keep
+        if new_fact_type in CHANGEABLE_FACT_TYPES and new_fact_type == existing_type:
+            if has_state_change_indicator(new_content, str(existing_content)):
+                continue  # don't skip — genuine state change
+
+        # 3. same type + high similarity → duplicate
+        if new_fact_type == existing_type:
+            if is_semantically_duplicate_fact(new_content, [str(existing_content)]):
+                return True
+
+        # 4. different type → only skip if extremely similar
+        else:
+            if is_semantically_duplicate_fact(
+                new_content, [str(existing_content)], threshold=0.92
+            ):
+                return True
+
+    return False
+
+
 # ── episode business validation ─────────────────────────────────────────────
 
 def _safe_int(value: Any) -> int | None:
