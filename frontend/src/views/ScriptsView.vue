@@ -316,6 +316,12 @@
                       :disabled="!selectedEpisode"
                     />
                   </el-tab-pane>
+                  <el-tab-pane label="文本预览" name="preview">
+                    <pre v-if="episodeEdit.plain_text_content" class="episode-text-preview">
+{{ episodeEdit.plain_text_content }}
+                    </pre>
+                    <el-empty v-else description="暂无文本预览" />
+                  </el-tab-pane>
                 </el-tabs>
                 <div class="module-actions">
                   <el-button
@@ -328,7 +334,7 @@
                   </el-button>
                   <el-button
                     type="primary"
-                    :disabled="!selectedEpisode"
+                    :disabled="!selectedEpisode || episodePreviewTab === 'preview'"
                     :loading="savingEpisode"
                     @click="saveEpisode"
                   >
@@ -534,7 +540,7 @@ const editingProject = ref<ScriptAdaptationProject | null>(null);
 const editingEvent = ref<ScriptPlotEventDetail | null>(null);
 const editingCharacter = ref<ScriptCharacterDetail | null>(null);
 const activeModule = ref("events");
-const episodePreviewTab = ref<"form" | "yaml">("form");
+const episodePreviewTab = ref<"form" | "yaml" | "preview">("form");
 const exportFormat = ref<"yaml" | "txt">("yaml");
 const openSceneNames = ref<string[]>([]);
 const loadingProjects = ref(false);
@@ -567,6 +573,7 @@ const episodeConfig = reactive({
 const episodeEdit = reactive({
   title: "",
   yaml_content: "",
+  plain_text_content: "",
   yaml_payload: null as Record<string, unknown> | null
 });
 type EpisodeDialogueForm = {
@@ -979,6 +986,7 @@ function selectEpisode(episode: ScriptEpisodeDetail) {
 function applyEpisodeEdit(episode: ScriptEpisodeDetail | null) {
   episodeEdit.title = episode?.title || "";
   episodeEdit.yaml_content = episode?.yaml_content || "";
+  episodeEdit.plain_text_content = episode?.plain_text_content || "";
   episodeEdit.yaml_payload = episode?.yaml_payload || null;
   applyEpisodeForm(episodeEdit.yaml_payload);
 }
@@ -1000,6 +1008,7 @@ async function saveEpisode() {
     selectedEpisode.value = await updateScriptEpisode(selectedEpisode.value.episode_id, {
       ...payload
     });
+    applyEpisodeEdit(selectedEpisode.value);
     await reloadSelectedData();
     ElMessage.success("剧本已保存");
   } finally {
