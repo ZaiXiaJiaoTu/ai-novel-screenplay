@@ -50,6 +50,31 @@ def add_version(db: Session, template: PromptTemplate) -> PromptTemplateVersion:
     return version
 
 
+def is_default_prompt_template(template: PromptTemplate, prompt_data: dict) -> bool:
+    return (
+        template.template_name == prompt_data["template_name"]
+        or template.template_name.startswith("默认")
+    )
+
+
+def sync_default_prompt_template(template: PromptTemplate, prompt_data: dict) -> bool:
+    changed = False
+    for field_name in (
+        "template_name",
+        "system_prompt",
+        "user_prompt_template",
+        "output_format",
+        "variables",
+    ):
+        new_value = prompt_data[field_name]
+        if getattr(template, field_name) != new_value:
+            setattr(template, field_name, new_value)
+            changed = True
+    if changed:
+        template.version += 1
+    return changed
+
+
 def create_prompt_template(
     db: Session, payload: PromptTemplateCreate
 ) -> PromptTemplateDetail:
@@ -63,23 +88,34 @@ def create_prompt_template(
 
 
 def seed_default_prompt_templates(db: Session) -> list[PromptTemplateDetail]:
-    created_templates: list[PromptTemplateDetail] = []
+    synced_templates: list[PromptTemplateDetail] = []
     for prompt_data in DEFAULT_PROMPT_TEMPLATES:
-        existing = db.scalar(
+        existing_templates = db.scalars(
             select(PromptTemplate).where(
                 PromptTemplate.task_type == prompt_data["task_type"],
                 PromptTemplate.is_deleted.is_(False),
             )
+        ).all()
+        existing = next(
+            (
+                template
+                for template in existing_templates
+                if is_default_prompt_template(template, prompt_data)
+            ),
+            None,
         )
         if existing is not None:
+            if sync_default_prompt_template(existing, prompt_data):
+                add_version(db, existing)
+                synced_templates.append(serialize_template(existing))
             continue
         template = PromptTemplate(**prompt_data, version=1, is_deleted=False)
         db.add(template)
         db.flush()
         add_version(db, template)
-        created_templates.append(serialize_template(template))
+        synced_templates.append(serialize_template(template))
     db.commit()
-    return created_templates
+    return synced_templates
 
 
 def list_prompt_templates(

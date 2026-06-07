@@ -91,6 +91,7 @@ SET
     version = version + 1,
     updated_at = NOW()
 WHERE task_type = 'plot_event_split_generation'
+  AND template_name LIKE '默认%'
   AND is_deleted = FALSE;
 
 -- ── 2. 单集剧本生成模板 ─────────────────────────────────────────────
@@ -235,6 +236,7 @@ Metadata规则：
     version = version + 1,
     updated_at = NOW()
 WHERE task_type = 'script_episode_generation'
+  AND template_name LIKE '默认%'
   AND is_deleted = FALSE;
 
 -- ── 3. 人物档案整合模板 ─────────────────────────────────────────────
@@ -295,6 +297,7 @@ SET
     version = version + 1,
     updated_at = NOW()
 WHERE task_type = 'character_profile_consolidation'
+  AND template_name LIKE '默认%'
   AND is_deleted = FALSE;
 
 -- ── 4. 单集剧本修复模板 ─────────────────────────────────────────────
@@ -335,6 +338,7 @@ YAML结构约束：{yaml_schema}
     version = version + 1,
     updated_at = NOW()
 WHERE task_type = 'script_episode_repair'
+  AND template_name LIKE '默认%'
   AND is_deleted = FALSE;
 
 -- ── 版本记录 ─────────────────────────────────────────────────────────
@@ -363,6 +367,7 @@ WHERE task_type IN (
     'character_profile_consolidation',
     'script_episode_repair'
 )
+  AND template_name LIKE '默认%'
   AND is_deleted = FALSE;
 
 COMMIT;
