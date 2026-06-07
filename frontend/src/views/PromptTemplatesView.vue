@@ -3,7 +3,7 @@
     <div class="page-header settings-header">
       <div>
         <h1 class="page-title">提示词模板</h1>
-        <p class="page-subtitle">管理各生成任务使用的 system prompt、用户模板、变量和历史版本。</p>
+        <p class="page-subtitle">管理剧情拆分、单集生成、人物整合和剧本修复使用的提示词模板。</p>
       </div>
       <div class="settings-actions">
         <el-button :icon="Refresh" :loading="loading" @click="loadTemplates">刷新</el-button>
@@ -66,7 +66,20 @@
             <el-input v-model="form.template_name" />
           </el-form-item>
           <el-form-item label="任务类型">
-            <el-input v-model="form.task_type" />
+            <el-select
+              v-model="form.task_type"
+              filterable
+              allow-create
+              default-first-option
+              placeholder="选择或输入任务类型"
+            >
+              <el-option
+                v-for="task in taskOptions"
+                :key="task.value"
+                :label="task.label"
+                :value="task.value"
+              />
+            </el-select>
           </el-form-item>
           <el-form-item label="输出格式">
             <el-select v-model="form.output_format">
@@ -139,7 +152,8 @@ import {
 const taskOptions = [
   { label: "剧情事件拆分", value: "plot_event_split_generation" },
   { label: "单集剧本生成", value: "script_episode_generation" },
-  { label: "人物档案整合", value: "character_profile_consolidation" }
+  { label: "人物档案整合", value: "character_profile_consolidation" },
+  { label: "单集剧本修复", value: "script_episode_repair" }
 ];
 
 const templates = ref<PromptTemplateDetail[]>([]);
