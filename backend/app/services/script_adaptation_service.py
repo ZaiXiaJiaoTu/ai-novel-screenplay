@@ -744,15 +744,6 @@ def merge_characters(
             existing_by_name[name] = character
         # Merge aliases from new item into metadata_json
         _merge_aliases_into_metadata(character, item)
-        existing_facts = {
-            fact.normalized_content
-            for fact in db.scalars(
-                select(ScriptCharacterFact).where(
-                    ScriptCharacterFact.character_id == character.id,
-                    ScriptCharacterFact.is_deleted.is_(False),
-                )
-            )
-        }
         existing_fact_objects = list(
             db.scalars(
                 select(ScriptCharacterFact).where(
@@ -774,19 +765,17 @@ def merge_characters(
             ):
                 continue
             normalized = normalize_fact_content(content)
-            db.add(
-                ScriptCharacterFact(
-                    project_id=project_id,
-                    character_id=character.id,
-                    batch_id=batch_id,
-                    fact_type=fact["fact_type"][:100],
-                    content=content,
-                    normalized_content=normalized,
-                    status="active",
-                )
+            fact_model = ScriptCharacterFact(
+                project_id=project_id,
+                character_id=character.id,
+                batch_id=batch_id,
+                fact_type=fact["fact_type"][:100],
+                content=content,
+                normalized_content=normalized,
+                status="active",
             )
-            existing_facts.add(normalized)
-            existing_contents.append(content)
+            db.add(fact_model)
+            existing_fact_objects.append(fact_model)
         rebuild_character_profile(db, character)
 
 
@@ -807,69 +796,82 @@ def split_one_batch(
     project.split_status = "running"
     db.commit()
 
-    if project.split_stop_requested:
-        project.split_status = "stopped"
-        if clear_stop_on_finish:
+    try:
+        if project.split_stop_requested:
+            project.split_status = "stopped"
+            if clear_stop_on_finish:
+                project.split_stop_requested = False
+            db.commit()
+            return get_progress(db, project_id)
+
+        variables = build_split_variables(project, book_title, chapters, db)
+        parsed_payload = None
+        try:
+            response_text = call_llm_for_task(
+                db,
+                task_type="plot_event_split_generation",
+                variables=variables,
+            )
+            parsed_payload = parse_json_payload(response_text)
+        except LlmServiceError:
+            parsed_payload = None
+        db.refresh(project)
+        payload = normalize_split_payload(parsed_payload, chapters)
+
+        batch = ScriptEventBatch(
+            project_id=project.id,
+            book_id=project.book_id,
+            batch_index=batch_index,
+            chapter_start_index=chapters[0].chapter_index,
+            chapter_end_index=chapters[-1].chapter_index,
+            raw_response=payload,
+        )
+        db.add(batch)
+        db.flush()
+
+        current_max = db.scalar(
+            select(func.max(ScriptPlotEvent.event_index)).where(
+                ScriptPlotEvent.project_id == project.id
+            )
+        ) or 0
+        for offset, item in enumerate(payload["events"], start=1):
+            if isinstance(item, str):
+                content = item
+                start_chapter = chapters[0].chapter_index
+                end_chapter = chapters[-1].chapter_index
+            else:
+                content = str(item.get("content") or item.get("event") or "").strip()
+                start_chapter = int(
+                    item.get("source_chapter_start") or chapters[0].chapter_index
+                )
+                end_chapter = int(
+                    item.get("source_chapter_end") or chapters[-1].chapter_index
+                )
+            if content:
+                db.add(
+                    ScriptPlotEvent(
+                        project_id=project.id,
+                        batch_id=batch.id,
+                        event_index=current_max + offset,
+                        content=content,
+                        source_chapter_start=start_chapter,
+                        source_chapter_end=end_chapter,
+                    )
+                )
+        merge_characters(db, project.id, payload["characters"], batch.id)
+        project.split_status = "stopped" if project.split_stop_requested else "idle"
+        if project.split_stop_requested and clear_stop_on_finish:
             project.split_stop_requested = False
         db.commit()
         return get_progress(db, project_id)
-
-    variables = build_split_variables(project, book_title, chapters, db)
-    parsed_payload = None
-    try:
-        response_text = call_llm_for_task(
-            db,
-            task_type="plot_event_split_generation",
-            variables=variables,
-        )
-        parsed_payload = parse_json_payload(response_text)
-    except LlmServiceError:
-        parsed_payload = None
-    db.refresh(project)
-    payload = normalize_split_payload(parsed_payload, chapters)
-
-    batch = ScriptEventBatch(
-        project_id=project.id,
-        book_id=project.book_id,
-        batch_index=batch_index,
-        chapter_start_index=chapters[0].chapter_index,
-        chapter_end_index=chapters[-1].chapter_index,
-        raw_response=payload,
-    )
-    db.add(batch)
-    db.flush()
-
-    current_max = db.scalar(
-        select(func.max(ScriptPlotEvent.event_index)).where(
-            ScriptPlotEvent.project_id == project.id
-        )
-    ) or 0
-    for offset, item in enumerate(payload["events"], start=1):
-        if isinstance(item, str):
-            content = item
-            start_chapter = chapters[0].chapter_index
-            end_chapter = chapters[-1].chapter_index
-        else:
-            content = str(item.get("content") or item.get("event") or "").strip()
-            start_chapter = int(item.get("source_chapter_start") or chapters[0].chapter_index)
-            end_chapter = int(item.get("source_chapter_end") or chapters[-1].chapter_index)
-        if content:
-            db.add(
-                ScriptPlotEvent(
-                    project_id=project.id,
-                    batch_id=batch.id,
-                    event_index=current_max + offset,
-                    content=content,
-                    source_chapter_start=start_chapter,
-                    source_chapter_end=end_chapter,
-                )
-            )
-    merge_characters(db, project.id, payload["characters"], batch.id)
-    project.split_status = "stopped" if project.split_stop_requested else "idle"
-    if project.split_stop_requested and clear_stop_on_finish:
-        project.split_stop_requested = False
-    db.commit()
-    return get_progress(db, project_id)
+    except Exception:
+        db.rollback()
+        project = db.scalar(select(ScriptProject).where(ScriptProject.id == project_id))
+        if project is not None:
+            project.split_status = "idle"
+            project.split_stop_requested = False
+            db.commit()
+        raise
 
 
 def run_split_all_batches(project_id: int) -> None:
@@ -891,6 +893,14 @@ def run_split_all_batches(project_id: int) -> None:
                 db.commit()
                 break
             split_one_batch(db, project_id, clear_stop_on_finish=False)
+    except Exception:
+        db.rollback()
+        project = db.scalar(select(ScriptProject).where(ScriptProject.id == project_id))
+        if project is not None:
+            project.split_status = "idle"
+            project.split_stop_requested = False
+            db.commit()
+        raise
     finally:
         db.close()
 
