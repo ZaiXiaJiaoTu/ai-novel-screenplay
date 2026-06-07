@@ -1,18 +1,8 @@
-# 接口设计文档
+# API 设计文档
 
-## 1. 接口设计说明
+## 1. 通用约定
 
-初版系统不区分管理员和普通用户，所有接口统一面向当前系统用户开放。
-
-接口按业务模块划分，包括小说作品接口、小说预处理接口、章节接口、故事设定档案接口、剧本生成任务接口、剧本书架接口、剧本下载接口、大模型API配置接口、提示词模板接口和大模型调用日志接口。
-
-大模型API配置、提示词模板和模型调用日志虽然属于系统配置类功能，但初版不做角色权限限制，统一通过普通页面入口进行管理。
-
----
-
-## 2. 统一响应格式
-
-所有接口统一返回：
+后端基路径为 `/api`。除下载接口外，响应统一为：
 
 ```json
 {
@@ -22,100 +12,74 @@
 }
 ```
 
-失败示例：
+错误响应：
 
 ```json
 {
   "code": 400,
-  "message": "小说内容不能为空",
+  "message": "错误信息",
   "data": null
 }
 ```
 
----
+## 2. 健康检查
 
-## 3. 小说作品接口
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/health` | 服务健康检查 |
+| GET | `/api/health/db` | 数据库连接检查 |
 
-### 3.1 上传小说文件
+## 3. 小说作品
 
-```http
-POST /api/books/upload
-Content-Type: multipart/form-data
-```
+### 3.1 文本上传
 
-参数：
-
-```text
-file：小说文件
-title：作品名称，可选
-```
-
-返回：
-
-```json
-{
-  "book_id": 1,
-  "title": "长夜来信",
-  "preprocess_status": "pending"
-}
-```
-
----
-
-### 3.2 粘贴文本创建小说
-
-```http
-POST /api/books/text
-Content-Type: application/json
-```
+`POST /api/books/text`
 
 请求：
 
 ```json
 {
-  "title": "长夜来信",
-  "content": "第1章 旧信\n......"
+  "title": "斗罗大陆",
+  "content": "第一章 ...\n第二章 ..."
 }
 ```
 
-返回：
+响应：
 
 ```json
 {
   "book_id": 1,
-  "title": "长夜来信",
-  "preprocess_status": "pending"
+  "title": "斗罗大陆",
+  "preprocess_status": "completed"
 }
 ```
 
----
+### 3.2 文件上传
 
-### 3.3 获取待选书架作品列表
+`POST /api/books/upload`
 
-```http
-GET /api/books
-```
+`multipart/form-data`：
 
-查询参数：
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| file | file | 是 | `.txt` 文件 |
+| title | string | 否 | 作品名 |
 
-```text
-keyword：搜索关键词
-novel_type：short/middle/long
-page：页码
-size：每页数量
-```
+### 3.3 作品列表
 
-返回：
+`GET /api/books?keyword=&novel_type=&page=1&size=20`
+
+响应：
 
 ```json
 {
   "records": [
     {
       "book_id": 1,
-      "title": "长夜来信",
+      "title": "斗罗大陆",
       "novel_type": "long",
-      "chapter_count": 128,
-      "word_count": 350000,
+      "chapter_count": 678,
+      "word_count": 1200000,
       "preprocess_status": "completed"
     }
   ],
@@ -123,769 +87,230 @@ size：每页数量
 }
 ```
 
----
+### 3.4 作品详情
 
-### 3.4 获取作品详情
+`GET /api/books/{book_id}`
 
-```http
-GET /api/books/{book_id}
+### 3.5 删除作品
+
+`DELETE /api/books/{book_id}`
+
+删除作品会软删除章节和关联剧本改编数据。
+
+## 4. 章节
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/books/{book_id}/chapters` | 获取作品章节列表 |
+| GET | `/api/chapters/{chapter_id}` | 获取章节正文 |
+| POST | `/api/books/{book_id}/chapters` | 新增章节 |
+| PUT | `/api/chapters/{chapter_id}` | 修改章节 |
+| DELETE | `/api/chapters/{chapter_id}` | 删除章节 |
+
+新增章节请求：
+
+```json
+{
+  "title": "第一章 武魂觉醒",
+  "content": "章节正文",
+  "chapter_index": 1
+}
 ```
 
-返回：
+修改章节请求：
+
+```json
+{
+  "title": "第一章 武魂觉醒",
+  "content": "新的正文"
+}
+```
+
+## 5. 剧本改编项目
+
+### 5.1 项目列表
+
+`GET /api/script-adaptations?page=1&size=20`
+
+### 5.2 创建项目
+
+`POST /api/script-adaptations`
 
 ```json
 {
   "book_id": 1,
-  "title": "长夜来信",
-  "novel_type": "long",
-  "chapter_count": 128,
-  "word_count": 350000,
-  "preprocess_status": "completed",
-  "story_profile_status": "confirmed"
+  "project_name": "斗罗大陆动画改编",
+  "adaptation_type": "animation",
+  "episode_duration": 24,
+  "pacing": "medium",
+  "scene_frequency": "medium",
+  "dialogue_density": "medium",
+  "events_per_episode": 10
 }
 ```
 
----
+`adaptation_type` 可选：`tv`、`short_drama`、`animation`、`audio_drama`。
 
-### 3.5 修改作品名称
+### 5.3 更新配置
 
-```http
-PUT /api/books/{book_id}/title
-```
+`PUT /api/script-adaptations/{project_id}/config`
 
-请求：
+可修改字段：`project_name`、`episode_duration`、`pacing`、`scene_frequency`、`dialogue_density`、`events_per_episode`。
+
+### 5.4 删除项目
+
+`DELETE /api/script-adaptations/{project_id}`
+
+### 5.5 进度
+
+`GET /api/script-adaptations/{project_id}/progress`
+
+## 6. 剧情事件拆分
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/script-adaptations/{project_id}/split/once` | 单批拆分 |
+| POST | `/api/script-adaptations/{project_id}/split/all` | 后台全部拆分 |
+| POST | `/api/script-adaptations/{project_id}/split/stop` | 请求停止拆分 |
+| GET | `/api/script-adaptations/{project_id}/batches` | 批次列表 |
+| GET | `/api/script-adaptations/{project_id}/events` | 剧情事件列表 |
+| PUT | `/api/script-adaptations/events/{event_id}` | 编辑事件 |
+| DELETE | `/api/script-adaptations/events/{event_id}` | 删除事件 |
+
+事件更新：
 
 ```json
 {
-  "title": "长夜来信修订版"
+  "content": "唐三完成武魂觉醒，发现蓝银草伴随先天满魂力。"
 }
 ```
 
----
+## 7. 人物档案
 
-### 3.6 删除作品
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/script-adaptations/{project_id}/characters` | 人物列表 |
+| PUT | `/api/script-adaptations/characters/{character_id}` | 编辑人物 |
+| POST | `/api/script-adaptations/{project_id}/characters/consolidate` | AI 整合人物档案 |
 
-```http
-DELETE /api/books/{book_id}
-```
-
-说明：
-
-采用软删除。如果存在关联剧本，后端可以返回提醒信息，由前端展示确认。
-
----
-
-## 4. 小说预处理接口
-
-### 4.1 启动预处理
-
-```http
-POST /api/books/{book_id}/preprocess
-```
-
-返回：
+人物更新：
 
 ```json
 {
-  "book_id": 1,
-  "status": "processing"
+  "name": "唐三",
+  "profile": "唐三，冷静坚韧，重视亲情，拥有蓝银草与昊天锤。",
+  "metadata_json": {}
 }
 ```
 
----
+## 8. 剧集生成与编辑
 
-### 4.2 查询预处理状态
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/script-adaptations/{project_id}/episodes/once` | 生成单集 |
+| POST | `/api/script-adaptations/{project_id}/episodes/all` | 后台全部生成 |
+| POST | `/api/script-adaptations/{project_id}/episodes/stop` | 请求停止生成 |
+| GET | `/api/script-adaptations/{project_id}/episodes` | 剧集列表 |
+| PUT | `/api/script-adaptations/episodes/{episode_id}` | 编辑剧集 |
 
-```http
-GET /api/books/{book_id}/preprocess/status
-```
-
-返回：
+生成请求：
 
 ```json
 {
-  "book_id": 1,
-  "status": "processing",
-  "current_step": "chapter_summary",
-  "processed_chapters": 20,
-  "total_chapters": 128
+  "events_per_episode": 10
 }
 ```
 
----
-
-## 5. 章节接口
-
-### 5.1 获取章节列表
-
-```http
-GET /api/books/{book_id}/chapters
-```
-
-返回：
-
-```json
-[
-  {
-    "chapter_id": 1,
-    "chapter_index": 1,
-    "title": "旧信",
-    "word_count": 4200
-  }
-]
-```
-
----
-
-### 5.2 获取章节详情
-
-```http
-GET /api/chapters/{chapter_id}
-```
-
-返回：
+编辑请求：
 
 ```json
 {
-  "chapter_id": 1,
-  "title": "旧信",
-  "content": "章节正文......"
-}
-```
-
----
-
-### 5.3 获取章节摘要
-
-```http
-GET /api/chapters/{chapter_id}/summary
-```
-
-返回：
-
-```json
-{
-  "chapter_id": 1,
-  "summary": "林川收到一封旧信，并开始怀疑多年前的事件另有隐情。",
-  "characters": ["林川", "许念"],
-  "key_events": ["旧信出现", "林川决定调查"],
-  "locations": ["教室", "旧教学楼"],
-  "clues": ["信封上的旧校徽"]
-}
-```
-
----
-
-## 6. 故事设定档案接口
-
-### 6.1 获取故事设定档案
-
-```http
-GET /api/books/{book_id}/story-profile
-```
-
-返回：
-
-```json
-{
-  "profile_id": 1,
-  "book_id": 1,
-  "title": "长夜来信",
-  "genre": "校园悬疑",
-  "overview": "故事围绕一封旧信展开。",
-  "world_setting": "现代校园",
-  "main_conflict": "主角需要查清旧信背后的真相。",
-  "characters": [],
-  "relationships": [],
-  "key_events": [],
-  "clues": [],
-  "version": 1,
-  "confirmed": true
-}
-```
-
----
-
-### 6.2 修改故事设定档案
-
-```http
-PUT /api/books/{book_id}/story-profile
-```
-
-请求：
-
-```json
-{
-  "genre": "校园悬疑",
-  "overview": "修改后的故事简介",
-  "world_setting": "现代校园",
-  "main_conflict": "主角需要查清旧信背后的真相",
-  "characters": [],
-  "relationships": [],
-  "key_events": [],
-  "clues": []
-}
-```
-
-返回：
-
-```json
-{
-  "version": 2
-}
-```
-
----
-
-## 7. 剧本生成任务接口
-
-### 7.1 创建剧本生成任务
-
-```http
-POST /api/script-tasks
-```
-
-请求：
-
-```json
-{
-  "book_id": 1,
-  "project_id": null,
-  "adapt_scope": {
-    "type": "chapter_range",
-    "start_chapter": 1,
-    "end_chapter": 5
-  },
-  "generation_config": {
-    "script_type": "short_drama",
-    "style": "校园悬疑",
-    "compression_level": "high",
-    "target_duration": 5,
-    "scene_density": "low",
-    "dialogue_ratio": "medium",
-    "narration_ratio": "low",
-    "keep_main_plot": true,
-    "allow_remove_side_plots": true,
-    "allow_merge_minor_characters": true
-  }
-}
-```
-
-返回：
-
-```json
-{
-  "task_id": 1001,
-  "status": "pending"
-}
-```
-
----
-
-### 7.2 启动生成任务
-
-```http
-POST /api/script-tasks/{task_id}/start
-```
-
-返回：
-
-```json
-{
-  "task_id": 1001,
-  "status": "running"
-}
-```
-
----
-
-### 7.3 查询生成任务状态
-
-```http
-GET /api/script-tasks/{task_id}
-```
-
-返回：
-
-```json
-{
-  "task_id": 1001,
-  "status": "running",
-  "current_step": "scene_planning",
-  "progress": 60,
-  "error_message": null
-}
-```
-
----
-
-### 7.4 重试当前步骤
-
-```http
-POST /api/script-tasks/{task_id}/retry
-```
-
----
-
-### 7.5 取消生成任务
-
-```http
-POST /api/script-tasks/{task_id}/cancel
-```
-
----
-
-## 8. 生成中间成果接口
-
-### 8.1 获取任务中间成果列表
-
-```http
-GET /api/script-tasks/{task_id}/artifacts
-```
-
-返回：
-
-```json
-[
-  {
-    "artifact_id": 1,
-    "artifact_type": "style_strategy",
-    "version": 1,
-    "editable": true
-  },
-  {
-    "artifact_id": 2,
-    "artifact_type": "scene_plan",
-    "version": 1,
-    "editable": true
-  }
-]
-```
-
----
-
-### 8.2 获取中间成果详情
-
-```http
-GET /api/artifacts/{artifact_id}
-```
-
----
-
-### 8.3 修改中间成果
-
-```http
-PUT /api/artifacts/{artifact_id}
-```
-
-请求：
-
-```json
-{
-  "content": {}
-}
-```
-
----
-
-## 9. 剧本书架接口
-
-### 9.1 获取剧本项目列表
-
-```http
-GET /api/script-projects
-```
-
-查询参数：
-
-```text
-keyword
-script_type
-page
-size
-```
-
-返回：
-
-```json
-{
-  "records": [
-    {
-      "project_id": 1,
-      "project_name": "长夜来信短剧版",
-      "book_title": "长夜来信",
-      "script_type": "短剧剧本",
-      "default_style": "校园悬疑",
-      "segment_count": 3
+  "title": "启程·诺丁城",
+  "yaml_payload": {
+    "script": {
+      "metadata": {
+        "title": "启程·诺丁城"
+      },
+      "scenes": []
     }
-  ],
-  "total": 1
-}
-```
-
----
-
-### 9.2 获取剧本项目详情
-
-```http
-GET /api/script-projects/{project_id}
-```
-
----
-
-### 9.3 修改剧本项目名称
-
-```http
-PUT /api/script-projects/{project_id}/name
-```
-
-请求：
-
-```json
-{
-  "project_name": "长夜来信短剧版第一稿"
-}
-```
-
----
-
-### 9.4 删除剧本项目
-
-```http
-DELETE /api/script-projects/{project_id}
-```
-
----
-
-### 9.5 获取剧本片段列表
-
-```http
-GET /api/script-projects/{project_id}/segments
-```
-
-返回：
-
-```json
-[
-  {
-    "segment_id": 1,
-    "segment_name": "第1章至第3章：旧信出现",
-    "style": "校园悬疑",
-    "compression_level": "high",
-    "target_duration": 5,
-    "scene_count": 4,
-    "status": "completed"
   }
-]
-```
-
----
-
-### 9.6 获取剧本片段详情
-
-```http
-GET /api/script-segments/{segment_id}
-```
-
----
-
-### 9.7 修改剧本片段名称
-
-```http
-PUT /api/script-segments/{segment_id}/name
-```
-
-请求：
-
-```json
-{
-  "segment_name": "第1章至第3章：旧信出现"
 }
 ```
 
----
+后端会强制规范化 `metadata.episode_number`、`source_book_title`、`adaptation_type` 等固定字段。
 
-### 9.8 编辑剧本片段内容
+## 9. 导出
 
-```http
-PUT /api/script-segments/{segment_id}/content
-```
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/script-adaptations/episodes/{episode_id}/download?format=yaml` | 单集导出 |
+| GET | `/api/script-adaptations/{project_id}/download?format=txt` | 全部导出 |
 
-请求：
+`format` 支持 `yaml`、`txt`。
 
-```json
-{
-  "yaml_content": "script:\n  title: 长夜来信\n",
-  "plain_text_content": "普通文本剧本内容"
-}
-```
+下载接口直接返回文件响应，不使用通用 JSON envelope。
 
----
+## 10. 大模型配置
 
-### 9.9 删除剧本片段
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/llm-configs` | 配置列表 |
+| POST | `/api/llm-configs` | 新增配置 |
+| PUT | `/api/llm-configs/{config_id}` | 修改配置 |
+| DELETE | `/api/llm-configs/{config_id}` | 删除配置 |
+| POST | `/api/llm-configs/{config_id}/default` | 设为默认 |
+| POST | `/api/llm-configs/{config_id}/test` | 测试连接 |
 
-```http
-DELETE /api/script-segments/{segment_id}
-```
-
----
-
-## 10. 剧本下载接口
-
-### 10.1 下载单个剧本片段
-
-```http
-GET /api/script-segments/{segment_id}/download?format=yaml
-```
-
-format可选：
-
-```text
-yaml
-txt
-docx
-pdf
-```
-
-初版实现yaml和txt。
-
----
-
-### 10.2 下载整个剧本项目
-
-```http
-GET /api/script-projects/{project_id}/download?format=txt
-```
-
----
-
-### 10.3 下载前检查
-
-```http
-GET /api/script-projects/{project_id}/export-check
-```
-
-返回：
+新增配置：
 
 ```json
 {
-  "chapter_continuous": true,
-  "style_consistent": false,
-  "duration_consistent": true,
-  "warnings": [
-    "当前剧本项目包含多个风格片段"
-  ]
-}
-```
-
----
-
-## 11. 大模型API管理接口
-
-### 11.1 新增模型配置
-
-```http
-POST /api/llm-configs
-```
-
-请求：
-
-```json
-{
-  "provider": "DeepSeek",
-  "base_url": "https://api.deepseek.com",
-  "api_key": "sk-xxxx",
+  "provider": "deepseek",
+  "base_url": "https://api.deepseek.com/v1",
+  "api_key": "sk-...",
   "model_name": "deepseek-chat",
   "temperature": 0.7,
   "top_p": 0.9,
   "max_tokens": 4096,
   "timeout_seconds": 60,
   "retry_count": 2,
-  "task_scope": [
-    "story_profile_generation",
-    "style_strategy_generation",
-    "scene_plan_generation",
-    "script_yaml_generation"
-  ],
-  "enabled": true
+  "task_scope": ["plot_event_split_generation", "script_episode_generation"],
+  "enabled": true,
+  "is_default": true
 }
 ```
 
-说明：
+## 11. 提示词模板
 
-后端保存时需要加密api_key，并生成脱敏展示字段api_key_masked。
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/prompt-templates` | 模板列表 |
+| POST | `/api/prompt-templates` | 新增模板 |
+| POST | `/api/prompt-templates/seed-defaults` | 初始化默认模板 |
+| PUT | `/api/prompt-templates/{template_id}` | 修改模板 |
+| DELETE | `/api/prompt-templates/{template_id}` | 删除模板 |
+| GET | `/api/prompt-templates/{template_id}/versions` | 版本列表 |
+| POST | `/api/prompt-templates/{template_id}/rollback/{version_id}` | 回滚版本 |
 
----
+当前默认任务类型：
 
-### 11.2 获取模型配置列表
+- `plot_event_split_generation`
+- `script_episode_generation`
+- `character_profile_consolidation`
 
-```http
-GET /api/llm-configs
-```
+## 12. 调用日志
 
----
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/llm-call-logs` | 日志列表 |
+| GET | `/api/llm-call-logs/{log_id}` | 日志详情 |
+| DELETE | `/api/llm-call-logs` | 清空日志 |
 
-### 11.3 修改模型配置
+列表筛选参数：
 
-```http
-PUT /api/llm-configs/{config_id}
-```
-
----
-
-### 11.4 删除模型配置
-
-```http
-DELETE /api/llm-configs/{config_id}
-```
-
----
-
-### 11.5 测试模型连接
-
-```http
-POST /api/llm-configs/{config_id}/test
-```
-
-返回：
-
-```json
-{
-  "provider": "DeepSeek",
-  "model_name": "deepseek-chat",
-  "latency_ms": 1260
-}
-```
-
----
-
-### 11.6 设置默认模型
-
-```http
-POST /api/llm-configs/{config_id}/default
-```
-
----
-
-## 12. 提示词模板接口
-
-### 12.1 新增提示词模板
-
-```http
-POST /api/prompt-templates
-```
-
-请求：
-
-```json
-{
-  "template_name": "剧本YAML生成模板",
-  "task_type": "script_yaml_generation",
-  "system_prompt": "你是一个专业剧本创作助手...",
-  "user_prompt_template": "请根据以下信息生成剧本YAML：{{scene_plan}}",
-  "output_format": "yaml",
-  "variables": [
-    "story_profile",
-    "script_type",
-    "style_strategy",
-    "generation_config",
-    "scene_plan",
-    "yaml_schema"
-  ],
-  "enabled": true
-}
-```
-
----
-
-### 12.2 获取提示词模板列表
-
-```http
-GET /api/prompt-templates
-```
-
-查询参数：
-
-```text
-task_type
-enabled
-keyword
-```
-
----
-
-### 12.3 修改提示词模板
-
-```http
-PUT /api/prompt-templates/{template_id}
-```
-
-说明：
-
-修改时需要生成新版本记录，不能直接覆盖历史版本。
-
----
-
-### 12.4 查看提示词版本
-
-```http
-GET /api/prompt-templates/{template_id}/versions
-```
-
----
-
-### 12.5 回滚提示词版本
-
-```http
-POST /api/prompt-templates/{template_id}/rollback/{version_id}
-```
-
----
-
-### 12.6 测试提示词模板
-
-```http
-POST /api/prompt-templates/{template_id}/test
-```
-
-请求：
-
-```json
-{
-  "llm_config_id": 1,
-  "test_variables": {
-    "story_profile": {},
-    "scene_plan": {},
-    "generation_config": {}
-  }
-}
-```
-
----
-
-## 13. 大模型调用日志接口
-
-### 13.1 获取调用日志
-
-```http
-GET /api/llm-call-logs
-```
-
-查询参数：
-
-```text
-task_type
-status
-start_time
-end_time
-page
-size
-```
-
----
-
-### 13.2 查看日志详情
-
-```http
-GET /api/llm-call-logs/{log_id}
-```
+- `task_type`
+- `status`
+- `start_time`
+- `end_time`
+- `page`
+- `size`

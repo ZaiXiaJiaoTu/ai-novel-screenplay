@@ -3,7 +3,7 @@
     <div class="page-header settings-header">
       <div>
         <h1 class="page-title">模型配置</h1>
-        <p class="page-subtitle">管理大模型网关、模型名称和调用参数，供摘要与剧本生成链路使用。</p>
+        <p class="page-subtitle">管理大模型网关、模型名称和调用参数，供剧情拆分、人物整合与剧本生成链路使用。</p>
       </div>
       <el-button type="primary" :icon="Plus" @click="openCreateDialog">新增配置</el-button>
     </div>
