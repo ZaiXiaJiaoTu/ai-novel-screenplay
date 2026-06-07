@@ -104,7 +104,12 @@ def get_yaml_schema_delta(adaptation_type: str) -> dict:
 
 
 def build_adaptation_config(project: ScriptProject) -> dict:
-    return {
+    """Build adaptation config with derived explicit targets.
+
+    Converts fuzzy pacing/scene_frequency/dialogue_density labels into
+    concrete numeric ranges so the model has precise guidance.
+    """
+    config: dict = {
         "adaptation_type": project.script_type,
         "adaptation_type_label": TYPE_LABELS.get(project.script_type or "", project.script_type),
         "episode_duration": project.default_target_duration,
@@ -117,6 +122,123 @@ def build_adaptation_config(project: ScriptProject) -> dict:
         "events_per_episode": project.events_per_episode,
         "yaml_schema_delta": project.yaml_schema_delta or get_yaml_schema_delta(project.script_type or "short_drama"),
     }
+    # ── derived explicit targets ───────────────────────────────────────
+    config.update(_derive_adaptation_targets(config))
+    return config
+
+
+def _derive_adaptation_targets(config: dict) -> dict:
+    """Compute concrete numeric targets from fuzzy labels.
+
+    These give the model explicit guardrails without hard-coding values
+    into the prompt templates themselves.
+    """
+    duration = int(config.get("episode_duration") or 5)
+    pacing = str(config.get("pacing") or "medium")
+    scene_freq = str(config.get("scene_frequency") or "medium")
+    dialogue_density = str(config.get("dialogue_density") or "medium")
+    events_per = int(config.get("events_per_episode") or 5)
+
+    # target_scene_count derived from events × scene frequency
+    scene_multiplier = {"high": 1.5, "medium": 1.0, "low": 0.7}
+    multiplier = scene_multiplier.get(scene_freq, 1.0)
+    center = max(2, round(events_per * multiplier))
+    target_scene_count = {"min": max(1, center - 2), "max": center + 2}
+
+    # dialogue_ratio from dialogue_density label
+    dialogue_ranges = {
+        "high": (0.45, 0.65),
+        "medium": (0.30, 0.50),
+        "low": (0.15, 0.35),
+    }
+    d_min, d_max = dialogue_ranges.get(dialogue_density, (0.25, 0.50))
+    dialogue_ratio = {"min": d_min, "max": d_max}
+
+    # scene_length_hint from pacing + duration
+    if duration <= 3:
+        scene_length_hint = "极短"
+    elif duration <= 7:
+        scene_length_hint = "短" if pacing == "fast" else "适中"
+    elif duration <= 15:
+        scene_length_hint = "适中" if pacing != "slow" else "较长"
+    else:
+        scene_length_hint = "较长"
+
+    # ending_requirement from adaptation type
+    adaptation_type = str(config.get("adaptation_type") or "short_drama")
+    ending_map = {
+        "short_drama": "形成悬念或情绪转折",
+        "tv": "设置下一集内容钩子",
+        "animation": "形成段落收束或悬念",
+        "audio_drama": "形成听觉收束或悬念",
+    }
+    ending_requirement = ending_map.get(adaptation_type, "形成悬念或情绪转折")
+
+    return {
+        "target_scene_count": target_scene_count,
+        "dialogue_ratio": dialogue_ratio,
+        "scene_length_hint": scene_length_hint,
+        "ending_requirement": ending_requirement,
+    }
+
+
+# ── relevant character selection ──────────────────────────────────────────
+
+def select_relevant_characters(
+    characters: list[ScriptCharacterDetail],
+    events: list[ScriptPlotEvent],
+    chapters: list[Chapter],
+    *,
+    max_characters: int = 30,
+) -> list[ScriptCharacterDetail]:
+    """Return only characters relevant to the given events and chapters.
+
+    Relevance rules:
+    1. Character name appears in event content.
+    2. Character name appears in chapter content.
+    3. Any alias (from metadata_json) appears in event or chapter content.
+    4. Always include a small number of core characters if the result set
+       is below *max_characters*.
+    """
+    if not characters:
+        return []
+
+    # Build the search corpus from event content and chapter content
+    corpus_parts: list[str] = []
+    for event in events:
+        corpus_parts.append(event.content)
+    for chapter in chapters:
+        corpus_parts.append(chapter.title)
+        corpus_parts.append(chapter.content or "")
+
+    corpus = "\n".join(corpus_parts)
+
+    # Normalise corpus for case-insensitive matching
+    corpus_lower = corpus.lower()
+
+    def _is_relevant(character: ScriptCharacterDetail) -> bool:
+        name = (character.name or "").strip()
+        if not name:
+            return False
+        if name.lower() in corpus_lower:
+            return True
+        # Check aliases from metadata_json
+        metadata = character.metadata_json or {}
+        aliases: list[str] = metadata.get("aliases") or []
+        for alias in aliases:
+            alias_str = str(alias).strip()
+            if alias_str and alias_str.lower() in corpus_lower:
+                return True
+        return False
+
+    relevant = [c for c in characters if _is_relevant(c)]
+
+    # If no characters matched at all, include a few core characters
+    if not relevant and characters:
+        relevant = characters[: min(3, len(characters))]
+
+    # Cap at max_characters
+    return relevant[:max_characters]
 
 
 def parse_json_payload(response_text: str) -> dict | None:
@@ -377,15 +499,19 @@ def build_character_context(db: Session, project_id: int) -> list[dict]:
             )
             .order_by(ScriptCharacterFact.id)
         ).all()
-        result.append(
-            {
-                "name": character.name,
-                "facts": [
-                    {"fact_type": fact.fact_type, "content": fact.content}
-                    for fact in facts
-                ],
-            }
-        )
+        entry: dict = {
+            "name": character.name,
+            "facts": [
+                {"fact_type": fact.fact_type, "content": fact.content}
+                for fact in facts
+            ],
+        }
+        # Include aliases from metadata_json if present (P1.2)
+        metadata = character.metadata_json or {}
+        aliases = metadata.get("aliases")
+        if isinstance(aliases, list) and aliases:
+            entry["aliases"] = [str(a).strip() for a in aliases if str(a).strip()]
+        result.append(entry)
     return result
 
 
@@ -489,6 +615,29 @@ def extract_character_facts(item: dict) -> list[dict]:
     return normalize_character_facts_payload(item)["facts"]
 
 
+def _merge_aliases_into_metadata(character: ScriptCharacterProfile, item: dict) -> None:
+    """Merge aliases from an incoming character item into metadata_json (P1.2)."""
+    incoming_aliases: list[str] = []
+    raw_aliases = item.get("aliases")
+    if isinstance(raw_aliases, list):
+        incoming_aliases = [str(a).strip() for a in raw_aliases if str(a).strip()]
+
+    metadata = dict(character.metadata_json or {})
+    existing_aliases: list[str] = [
+        str(a).strip()
+        for a in (metadata.get("aliases") or [])
+        if str(a).strip()
+    ]
+
+    # Merge without duplicates
+    merged: list[str] = list(dict.fromkeys(existing_aliases + incoming_aliases))
+    if merged:
+        metadata["aliases"] = merged
+    elif "aliases" in metadata:
+        del metadata["aliases"]
+    character.metadata_json = metadata
+
+
 def rebuild_character_profile(db: Session, character: ScriptCharacterProfile) -> None:
     facts = db.scalars(
         select(ScriptCharacterFact)
@@ -507,24 +656,32 @@ def rebuild_character_profile(db: Session, character: ScriptCharacterProfile) ->
 def merge_characters(
     db: Session, project_id: int, characters: list[dict], batch_id: int | None = None
 ) -> None:
-    existing = {
-        character.name: character
-        for character in db.scalars(
-            select(ScriptCharacterProfile).where(
-                ScriptCharacterProfile.project_id == project_id,
-                ScriptCharacterProfile.is_deleted.is_(False),
-            )
+    existing_by_name: dict[str, ScriptCharacterProfile] = {}
+    existing_aliases: dict[str, ScriptCharacterProfile] = {}
+    for character in db.scalars(
+        select(ScriptCharacterProfile).where(
+            ScriptCharacterProfile.project_id == project_id,
+            ScriptCharacterProfile.is_deleted.is_(False),
         )
-    }
+    ):
+        existing_by_name[character.name] = character
+        metadata = character.metadata_json or {}
+        for alias in metadata.get("aliases") or []:
+            alias_str = str(alias).strip()
+            if alias_str:
+                existing_aliases[alias_str] = character
+
     for item in characters:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name") or "").strip()
         if not name:
             continue
-        if name in existing:
-            character = existing[name]
-            character.metadata_json = item
+        # Match by name first, then by existing aliases
+        if name in existing_by_name:
+            character = existing_by_name[name]
+        elif name in existing_aliases:
+            character = existing_aliases[name]
         else:
             character = ScriptCharacterProfile(
                 project_id=project_id,
@@ -534,7 +691,9 @@ def merge_characters(
             )
             db.add(character)
             db.flush()
-            existing[name] = character
+            existing_by_name[name] = character
+        # Merge aliases from new item into metadata_json
+        _merge_aliases_into_metadata(character, item)
         existing_facts = {
             fact.normalized_content
             for fact in db.scalars(
@@ -945,14 +1104,20 @@ def build_episode_variables(
     events: list[ScriptPlotEvent],
     episode_number: int,
 ) -> dict:
-    characters = get_characters(db, project.id) or []
+    all_characters = get_characters(db, project.id) or []
     chapters = get_event_source_chapters(db, project, events)
+    # P1.1: only pass characters relevant to this episode's events + chapters
+    relevant_characters = select_relevant_characters(
+        all_characters,
+        events,
+        chapters,
+    )
     return {
         "book_title": book_title,
         "adaptation_config": build_adaptation_config(project),
         "episode_number": episode_number,
         "events": [serialize_event(event).model_dump() for event in events],
-        "characters": [character.model_dump() for character in characters],
+        "characters": [character.model_dump() for character in relevant_characters],
         "chapters": [
             {
                 "chapter_index": chapter.chapter_index,

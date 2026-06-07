@@ -141,6 +141,7 @@ def _mock_characters_and_chapters():
     import contextlib
     stack = contextlib.ExitStack()
     char_mock = MagicMock()
+    char_mock.name = "唐三"
     char_mock.model_dump.return_value = {
         "character_id": 1, "name": "唐三", "profile": "唐三，主角。",
         "metadata_json": {},

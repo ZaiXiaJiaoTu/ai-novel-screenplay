@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from app.services.script_adaptation_service import (
+    _derive_adaptation_targets,
     build_adaptation_config,
     build_episode_text_from_yaml,
     episode_payload_matches_source,
@@ -11,6 +12,7 @@ from app.services.script_adaptation_service import (
     normalize_fact_content,
     parse_json_payload,
     parse_yaml_payload,
+    select_relevant_characters,
     serialize_character,
 )
 
@@ -317,3 +319,149 @@ def test_normalize_mixed_fact_keys():
     assert result["facts"][0]["fact_type"] == "身份"
     assert result["facts"][1]["fact_type"] == "能力"
     assert result["facts"][2]["fact_type"] == "物品"
+
+
+# ── build_adaptation_config (P1.3) ───────────────────────────────────
+
+
+def test_adaptation_config_includes_derived_targets():
+    """P1.3: build_adaptation_config returns explicit numeric targets."""
+    project = SimpleNamespace(
+        script_type="short_drama",
+        default_target_duration=5,
+        pacing="fast",
+        scene_frequency="high",
+        dialogue_density="medium",
+        events_per_episode=8,
+        yaml_schema_delta=None,
+    )
+
+    config = build_adaptation_config(project)
+
+    assert "target_scene_count" in config
+    assert "dialogue_ratio" in config
+    assert "scene_length_hint" in config
+    assert "ending_requirement" in config
+    assert config["target_scene_count"]["min"] >= 1
+    assert config["target_scene_count"]["max"] >= config["target_scene_count"]["min"]
+    assert 0 <= config["dialogue_ratio"]["min"] <= config["dialogue_ratio"]["max"] <= 1
+
+
+def test_derive_targets_scene_count_scales_with_frequency():
+    low = _derive_adaptation_targets(
+        {"scene_frequency": "low", "events_per_episode": 10, "pacing": "medium", "dialogue_density": "medium", "episode_duration": 5, "adaptation_type": "tv"}
+    )
+    high = _derive_adaptation_targets(
+        {"scene_frequency": "high", "events_per_episode": 10, "pacing": "medium", "dialogue_density": "medium", "episode_duration": 5, "adaptation_type": "tv"}
+    )
+    assert high["target_scene_count"]["max"] > low["target_scene_count"]["max"]
+
+
+def test_derive_targets_ending_differs_by_type():
+    tv = _derive_adaptation_targets(
+        {"adaptation_type": "tv", "episode_duration": 5, "pacing": "medium", "scene_frequency": "medium", "dialogue_density": "medium", "events_per_episode": 5}
+    )
+    short = _derive_adaptation_targets(
+        {"adaptation_type": "short_drama", "episode_duration": 5, "pacing": "medium", "scene_frequency": "medium", "dialogue_density": "medium", "events_per_episode": 5}
+    )
+    assert tv["ending_requirement"] != short["ending_requirement"]
+
+
+# ── select_relevant_characters (P1.1) ──────────────────────────────────
+
+
+def _make_char_detail(name: str, *, aliases: list[str] | None = None) -> SimpleNamespace:
+    meta = {}
+    if aliases:
+        meta["aliases"] = aliases
+    return SimpleNamespace(
+        character_id=hash(name) % 10000,
+        name=name,
+        profile=f"{name}的档案",
+        metadata_json=meta,
+    )
+
+
+def _make_chapter(index: int, title: str, content: str) -> SimpleNamespace:
+    return SimpleNamespace(chapter_index=index, title=title, content=content)
+
+
+def _make_event(index: int, content: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=100 + index, batch_id=1, event_index=index,
+        content=content, source_chapter_start=1, source_chapter_end=1,
+        locked=False,
+    )
+
+
+def test_select_characters_by_event_content():
+    characters = [
+        _make_char_detail("Alice"),
+        _make_char_detail("Bob"),
+        _make_char_detail("Charlie"),
+    ]
+    events = [_make_event(1, "Alice and Bob walked into the room.")]
+    chapters = []
+
+    result = select_relevant_characters(characters, events, chapters)
+
+    names = {c.name for c in result}
+    assert "Alice" in names
+    assert "Bob" in names
+    assert "Charlie" not in names
+
+
+def test_select_characters_by_chapter_content():
+    characters = [_make_char_detail("Master"), _make_char_detail("Alice")]
+    events = []
+    chapters = [_make_chapter(1, "Master's Guidance", "Master taught Alice the theory.")]
+
+    result = select_relevant_characters(characters, events, chapters)
+
+    names = {c.name for c in result}
+    assert "Master" in names
+    assert "Alice" in names
+
+
+def test_select_characters_by_alias():
+    """P1.2: Characters are matched by alias if name doesn't appear in corpus."""
+    characters = [
+        _make_char_detail("Alice", aliases=["Ali", "Ally"]),
+    ]
+    events = [_make_event(1, "Ali walked onto the stage.")]
+    chapters = []
+
+    result = select_relevant_characters(characters, events, chapters)
+
+    assert len(result) == 1
+    assert result[0].name == "Alice"
+
+
+def test_select_characters_includes_core_when_few_matched():
+    """When no characters match, at most 3 are included as fallback."""
+    characters = [
+        _make_char_detail("Alice"),
+        _make_char_detail("Bob"),
+        _make_char_detail("Charlie"),
+        _make_char_detail("Diana"),
+    ]
+    events = [_make_event(1, "The sun is shining.")]  # no character names
+    chapters = []
+
+    result = select_relevant_characters(characters, events, chapters)
+
+    assert 1 <= len(result) <= 3
+
+
+def test_select_characters_respects_max_limit():
+    characters = [_make_char_detail(f"Char{i}") for i in range(50)]
+    events = [_make_event(i, f"Char{i} appears.") for i in range(50)]
+    chapters = []
+
+    result = select_relevant_characters(characters, events, chapters, max_characters=30)
+
+    assert len(result) == 30
+
+
+def test_select_empty_characters_returns_empty():
+    assert select_relevant_characters([], [], []) == []
