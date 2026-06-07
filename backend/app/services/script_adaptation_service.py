@@ -375,8 +375,8 @@ def build_character_context(db: Session, project_id: int) -> list[dict]:
         result.append(
             {
                 "name": character.name,
-                "traits": [
-                    {"trait_type": fact.fact_type, "content": fact.content}
+                "facts": [
+                    {"fact_type": fact.fact_type, "content": fact.content}
                     for fact in facts
                 ],
             }
@@ -400,14 +400,14 @@ def build_split_variables(
             for chapter in chapters
         ],
         "output_contract": {
-            "events": ["简洁且准确的一段剧情事件"],
+            "events": [{"content": "简洁且准确的一段剧情事件", "source_chapter_start": 1, "source_chapter_end": 1}],
             "characters": [
                 {
-                    "name": "人物名",
+                    "name": "人物标准名称",
                     "facts": [
                         {
-                            "trait_type": "关键特征/性格/能力/关系/当前状态",
-                            "content": "只写本批章节带来的新增关键特征或性格变化，不写完整人物介绍",
+                            "fact_type": "关键特征/性格/能力/关系/当前状态",
+                            "content": "只写本批章节带来的新增关键特征或状态变化，不写完整人物介绍",
                         }
                     ],
                 }
@@ -445,15 +445,21 @@ def normalize_fact_content(value: str) -> str:
     return re.sub(r"[\s，,。；;：:、]+", "", value.strip().lower())[:500]
 
 
-def extract_character_facts(item: dict) -> list[dict]:
-    facts = item.get("traits") or item.get("features") or item.get("facts")
-    if isinstance(facts, list):
-        result = []
-        for fact in facts:
+def normalize_character_facts_payload(item: dict) -> dict:
+    """Normalize a character item from any format to the standard facts schema.
+
+    Compatible input keys: traits, features, facts, profile, description.
+    Output always uses ``facts`` with ``fact_type`` and ``content``.
+    """
+    result: dict = {"name": str(item.get("name") or "").strip()}
+    raw_facts = item.get("traits") or item.get("features") or item.get("facts")
+    if isinstance(raw_facts, list):
+        normalized: list[dict] = []
+        for fact in raw_facts:
             if isinstance(fact, str):
-                result.append({"fact_type": "关键特征", "content": fact.strip()})
+                normalized.append({"fact_type": "关键特征", "content": fact.strip()})
             elif isinstance(fact, dict):
-                result.append(
+                normalized.append(
                     {
                         "fact_type": str(
                             fact.get("trait_type")
@@ -471,9 +477,15 @@ def extract_character_facts(item: dict) -> list[dict]:
                         ).strip(),
                     }
                 )
-        return result
-    profile = str(item.get("profile") or item.get("description") or "").strip()
-    return [{"fact_type": "设定", "content": profile}] if profile else []
+        result["facts"] = normalized
+    else:
+        fallback = str(item.get("profile") or item.get("description") or "").strip()
+        result["facts"] = [{"fact_type": "设定", "content": fallback}] if fallback else []
+    return result
+
+
+def extract_character_facts(item: dict) -> list[dict]:
+    return normalize_character_facts_payload(item)["facts"]
 
 
 def rebuild_character_profile(db: Session, character: ScriptCharacterProfile) -> None:
@@ -801,9 +813,8 @@ def consolidate_character_profiles(db: Session, project_id: int) -> list[ScriptC
         "characters": [
             {
                 "name": character.name,
-                "profile": character.profile,
-                "traits": [
-                    {"trait_type": fact.fact_type, "content": fact.content}
+                "facts": [
+                    {"fact_type": fact.fact_type, "content": fact.content}
                     for fact in db.scalars(
                         select(ScriptCharacterFact)
                         .where(
