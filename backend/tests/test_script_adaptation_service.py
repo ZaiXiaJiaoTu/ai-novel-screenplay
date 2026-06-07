@@ -6,6 +6,7 @@ from app.services.script_adaptation_service import (
     build_episode_text_from_yaml,
     episode_payload_matches_source,
     get_yaml_schema_delta,
+    merge_characters,
     normalize_character_facts_payload,
     normalize_episode_metadata,
     normalize_episode_source_events,
@@ -15,6 +16,7 @@ from app.services.script_adaptation_service import (
     select_relevant_characters,
     serialize_character,
 )
+from app.models.script_adaptation import ScriptCharacterFact, ScriptCharacterProfile
 
 
 def test_yaml_schema_delta_differs_by_adaptation_type():
@@ -465,3 +467,57 @@ def test_select_characters_respects_max_limit():
 
 def test_select_empty_characters_returns_empty():
     assert select_relevant_characters([], [], []) == []
+
+
+class _ScalarResult:
+    def __init__(self, values):
+        self.values = values
+
+    def __iter__(self):
+        return iter(self.values)
+
+    def all(self):
+        return self.values
+
+
+class _FakeMergeDb:
+    def __init__(self):
+        self.scalar_results = [[], [], [], []]
+        self.added = []
+        self.next_id = 1
+
+    def scalars(self, _stmt):
+        return _ScalarResult(self.scalar_results.pop(0))
+
+    def add(self, item):
+        self.added.append(item)
+
+    def flush(self):
+        for item in self.added:
+            if getattr(item, "id", None) is None:
+                item.id = self.next_id
+                self.next_id += 1
+
+
+def test_merge_characters_adds_new_facts_without_name_error():
+    db = _FakeMergeDb()
+    characters = [
+        {
+            "name": "唐三",
+            "aliases": ["小三"],
+            "facts": [
+                {"fact_type": "身份", "content": "唐三是圣魂村铁匠之子"},
+                {"fact_type": "能力", "content": "唐三修炼玄天功"},
+            ],
+        }
+    ]
+
+    merge_characters(db, project_id=1, characters=characters, batch_id=10)
+
+    profile = next(item for item in db.added if isinstance(item, ScriptCharacterProfile))
+    facts = [item for item in db.added if isinstance(item, ScriptCharacterFact)]
+    assert profile.metadata_json["aliases"] == ["小三"]
+    assert [fact.content for fact in facts] == [
+        "唐三是圣魂村铁匠之子",
+        "唐三修炼玄天功",
+    ]
