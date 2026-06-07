@@ -1271,14 +1271,17 @@ def generate_one_episode(
         variables["characters"],
         get_event_source_chapters(db, project, events),
     )
+
+    # ── Phase 1: generate ────────────────────────────────────────────
+    generated_yaml = None
     parsed = None
     try:
-        response_text = call_llm_for_task(
+        generated_yaml = call_llm_for_task(
             db,
             task_type="script_episode_generation",
             variables=variables,
         )
-        parsed = parse_yaml_payload(response_text)
+        parsed = parse_yaml_payload(generated_yaml)
     except LlmServiceError:
         parsed = None
     db.refresh(project)
@@ -1288,47 +1291,101 @@ def generate_one_episode(
         source_text=source_text,
     ):
         parsed = None
-    script_payload = parsed or fallback_episode_payload(project, next_index, events, book_title)
-    script_payload = normalize_episode_metadata(
-        script_payload,
-        project,
-        episode_number=next_index,
-        book_title=book_title,
-        events=events,
-    )
-    script_payload = normalize_episode_source_events(script_payload, events)
 
-    # Business-rule validation (repair flow will be added in a follow-up)
-    validation_issues = validate_episode_payload(
-        script_payload,
-        events=events,
-        episode_number=next_index,
-        book_title=book_title,
-    )
-    used_fallback = parsed is None
-    severe_issues = [
-        issue for issue in validation_issues
-        if issue.code in ("MISSING_SCRIPT", "MISSING_OR_EMPTY_SCENES")
-    ]
-    if severe_issues and not used_fallback:
-        script_payload = fallback_episode_payload(project, next_index, events, book_title)
+    # ── Phase 2: normalise + validate ────────────────────────────────
+    needs_repair = False
+    if parsed:
         script_payload = normalize_episode_metadata(
-            script_payload,
+            parsed,
             project,
             episode_number=next_index,
             book_title=book_title,
             events=events,
         )
         script_payload = normalize_episode_source_events(script_payload, events)
+    else:
+        needs_repair = True  # parse failure → attempt repair below
+        script_payload = None
+
+    if script_payload is not None:
+        validation_issues = validate_episode_payload(
+            script_payload,
+            events=events,
+            episode_number=next_index,
+            book_title=book_title,
+        )
+        if validation_issues:
+            needs_repair = True
+    else:
+        validation_issues = []
+
+    # ── Phase 3: repair (once) ───────────────────────────────────────
+    used_fallback = False
+    used_repair = False
+    if needs_repair:
+        repair_vars = build_episode_variables(db, project, book_title, events, next_index)
+        repair_vars["validation_errors"] = [
+            {"code": issue.code, "message": issue.message, "path": issue.path}
+            for issue in validation_issues
+        ]
+        repair_vars["raw_output"] = generated_yaml or ""
+        # Use yaml_schema key name expected by the repair template
+        repair_vars["yaml_schema"] = repair_vars.pop("yaml_schema_delta", None)
+        try:
+            repair_yaml = call_llm_for_task(
+                db,
+                task_type="script_episode_repair",
+                variables=repair_vars,
+            )
+            repair_parsed = parse_yaml_payload(repair_yaml)
+            if repair_parsed and episode_payload_matches_source(
+                repair_parsed,
+                book_title=book_title,
+                source_text=source_text,
+            ):
+                script_payload = normalize_episode_metadata(
+                    repair_parsed,
+                    project,
+                    episode_number=next_index,
+                    book_title=book_title,
+                    events=events,
+                )
+                script_payload = normalize_episode_source_events(script_payload, events)
+                # Re-validate after repair
+                validation_issues = validate_episode_payload(
+                    script_payload,
+                    events=events,
+                    episode_number=next_index,
+                    book_title=book_title,
+                )
+                if not validation_issues:
+                    used_repair = True
+        except LlmServiceError:
+            pass
+
+    # ── Phase 4: fallback if still broken ────────────────────────────
+    if validation_issues or script_payload is None:
+        script_payload = fallback_episode_payload(project, next_index, events, book_title)
+        script_payload = normalize_episode_metadata(
+            script_payload, project,
+            episode_number=next_index, book_title=book_title, events=events,
+        )
+        script_payload = normalize_episode_source_events(script_payload, events)
+        validation_issues = []
         used_fallback = True
 
+    # ── Phase 5: save ────────────────────────────────────────────────
     yaml_content = dump_episode_yaml(script_payload)
     plain_text = build_episode_text(script_payload)
     metadata = script_payload["script"]["metadata"]
-    status = "completed"
-    if validation_issues and not used_fallback:
-        # Minor issues — still save but mark as draft for review
+
+    if used_fallback:
+        status = "fallback"
+    elif validation_issues:
         status = "draft"
+    else:
+        status = "completed"
+
     episode = ScriptEpisode(
         project_id=project.id,
         episode_index=next_index,
